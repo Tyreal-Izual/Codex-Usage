@@ -20,7 +20,6 @@ No third-party Python packages are required. Windows is not supported because th
 The repository layout is deliberately flat:
 
 ```text
-.gitignore
 codex_usage.py
 LICENCE
 README.md
@@ -187,7 +186,7 @@ codex_resets_report_2026-06-20_114005.json
 codex_online-usage_report_2026-06-20_114005.csv
 ```
 
-The script never removes exported reports. Generated report files matching `codex_*_report_*` are ignored by this repository's `.gitignore` so they are not accidentally included in Git commits.
+The script never removes exported reports. If you export inside a Git checkout, check `git status` before committing and keep generated `codex_*_report_*` files out of the source release.
 
 ## Privacy And Authentication
 
