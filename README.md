@@ -257,6 +257,21 @@ For automation, use JSON output on non-export report commands:
 
 If a numeric option is invalid, the script exits before making requests. `--top` and `--days` must be at least `1`; `--warn-days` must be `0` or greater.
 
+## Contributing
+
+Bug reports, focused fixes and documentation improvements are welcome.
+
+Keep changes narrow and include the checks that match the touched area. For README-only changes, run the repository validation. For script changes, also run the relevant `--help` command and a syntax check:
+
+```sh
+python3 -m py_compile ./codex_usage.py
+python3 codex_usage.py --help
+```
+
+Do not include access tokens, `~/.codex/auth.json`, exported reports, raw backend responses, local transcripts, private prompts, private paths or account data in issues, commits, fixtures or screenshots.
+
+Please report security or privacy issues privately instead of publishing exploit details.
+
 ## Licence
 
 This project uses the MIT Licence. See [LICENCE](LICENCE).
