@@ -17,10 +17,12 @@ This is not an official OpenAI or Codex tool. It does not redeem credits, buy cr
 
 No third-party Python packages are required. Windows is not supported because the script expects Unix-style paths, an executable shebang workflow and a Codex home at `~/.codex`.
 
-The repository layout is deliberately flat:
+The source layout is deliberately small:
 
 ```text
+.gitattributes
 codex_usage.py
+img/
 LICENCE
 README.md
 ```
@@ -124,6 +126,19 @@ For automation, print machine-readable JSON instead of prose and tables:
 ./codex_usage.py local-usage --json
 ./codex_usage.py online-usage --json
 ```
+
+## Screenshots
+
+<!-- markdownlint-disable MD033 -- HTML is used here so GitHub can render bounded thumbnails that link to the full-size screenshots. -->
+<p>
+  <a href="https://github.com/MacSteini/Codex-Usage/blob/main/img/1.png"><img src="https://github.com/MacSteini/Codex-Usage/raw/main/img/1.png" alt="Codex Usage screenshot 1" width="220"></a>
+  <a href="https://github.com/MacSteini/Codex-Usage/blob/main/img/2.png"><img src="https://github.com/MacSteini/Codex-Usage/raw/main/img/2.png" alt="Codex Usage screenshot 2" width="220"></a>
+  <a href="https://github.com/MacSteini/Codex-Usage/blob/main/img/3.png"><img src="https://github.com/MacSteini/Codex-Usage/raw/main/img/3.png" alt="Codex Usage screenshot 3" width="220"></a>
+  <a href="https://github.com/MacSteini/Codex-Usage/blob/main/img/4.png"><img src="https://github.com/MacSteini/Codex-Usage/raw/main/img/4.png" alt="Codex Usage screenshot 4" width="220"></a>
+  <a href="https://github.com/MacSteini/Codex-Usage/blob/main/img/5.png"><img src="https://github.com/MacSteini/Codex-Usage/raw/main/img/5.png" alt="Codex Usage screenshot 5" width="220"></a>
+  <a href="https://github.com/MacSteini/Codex-Usage/blob/main/img/6.png"><img src="https://github.com/MacSteini/Codex-Usage/raw/main/img/6.png" alt="Codex Usage screenshot 6" width="220"></a>
+</p>
+<!-- markdownlint-enable MD033 -->
 
 ## Command Reference
 
