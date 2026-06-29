@@ -124,6 +124,25 @@ export OPENAI_ADMIN_KEY="your-admin-key"
 
 `api-usage` calls the OpenAI Admin API, not the Codex or ChatGPT backend endpoints. It reads `OPENAI_ADMIN_KEY` from the environment only; there is no CLI flag for the key.
 
+Set the Admin key only when you use `api-usage`. For a single run, prefix the command:
+
+```sh
+OPENAI_ADMIN_KEY="your-admin-key" ./codex_usage.py api-usage
+```
+
+That short form can be saved in shell history. To avoid putting the key on the command line, enter it into the current terminal session without echoing it, run the report, then remove it from the session:
+
+```sh
+printf "OPENAI_ADMIN_KEY: "
+read -rs OPENAI_ADMIN_KEY
+printf "\n"
+export OPENAI_ADMIN_KEY
+./codex_usage.py api-usage
+unset OPENAI_ADMIN_KEY
+```
+
+For the current terminal session, the script only needs `OPENAI_ADMIN_KEY` to be exported before it starts. For regular use, load the value from your operating system's secret manager before you start the script, or export it from your shell profile, such as `~/.zshrc` or `~/.bashrc`. If you store it in a shell profile, treat that file as a credential. Do not put the key in this repository, screenshots, issues, commits, report exports, or `~/.codex/auth.json`.
+
 For copy/paste-friendly output, scripted checks or logs, disable terminal colour:
 
 ```sh
@@ -146,12 +165,12 @@ For automation, print machine-readable JSON instead of prose and tables:
 
 <!-- markdownlint-disable MD033 -- HTML is used here so GitHub can render bounded thumbnails that link to the full-size screenshots. -->
 <p>
-  <a href="https://github.com/MacSteini/Codex-Usage/blob/main/img/1.png"><img src="https://github.com/MacSteini/Codex-Usage/raw/main/img/1.png" alt="Codex Usage screenshot 1" width="220"></a>
-  <a href="https://github.com/MacSteini/Codex-Usage/blob/main/img/2.png"><img src="https://github.com/MacSteini/Codex-Usage/raw/main/img/2.png" alt="Codex Usage screenshot 2" width="220"></a>
-  <a href="https://github.com/MacSteini/Codex-Usage/blob/main/img/3.png"><img src="https://github.com/MacSteini/Codex-Usage/raw/main/img/3.png" alt="Codex Usage screenshot 3" width="220"></a>
-  <a href="https://github.com/MacSteini/Codex-Usage/blob/main/img/4.png"><img src="https://github.com/MacSteini/Codex-Usage/raw/main/img/4.png" alt="Codex Usage screenshot 4" width="220"></a>
-  <a href="https://github.com/MacSteini/Codex-Usage/blob/main/img/5.png"><img src="https://github.com/MacSteini/Codex-Usage/raw/main/img/5.png" alt="Codex Usage screenshot 5" width="220"></a>
-  <a href="https://github.com/MacSteini/Codex-Usage/blob/main/img/6.png"><img src="https://github.com/MacSteini/Codex-Usage/raw/main/img/6.png" alt="Codex Usage screenshot 6" width="220"></a>
+  <a href="https://github.com/MacSteini/Codex-Usage/blob/main/img/1.png"><img src="img/1.png" alt="Codex Usage screenshot 1" width="220"></a>
+  <a href="https://github.com/MacSteini/Codex-Usage/blob/main/img/2.png"><img src="img/2.png" alt="Codex Usage screenshot 2" width="220"></a>
+  <a href="https://github.com/MacSteini/Codex-Usage/blob/main/img/3.png"><img src="img/3.png" alt="Codex Usage screenshot 3" width="220"></a>
+  <a href="https://github.com/MacSteini/Codex-Usage/blob/main/img/4.png"><img src="img/4.png" alt="Codex Usage screenshot 4" width="220"></a>
+  <a href="https://github.com/MacSteini/Codex-Usage/blob/main/img/5.png"><img src="img/5.png" alt="Codex Usage screenshot 5" width="220"></a>
+  <a href="https://github.com/MacSteini/Codex-Usage/blob/main/img/6.png"><img src="img/6.png" alt="Codex Usage screenshot 6" width="220"></a>
 </p>
 <!-- markdownlint-enable MD033 -->
 
@@ -286,9 +305,12 @@ chmod +x codex_usage.py
 
 If the script says `~/.codex/auth.json` is missing or malformed, sign in to Codex first, then run the script again. Codex Usage reuses that existing login; the core reports do not ask for, store or need an OpenAI API key.
 
-If `api-usage` says `OPENAI_ADMIN_KEY` is missing, set it in your shell environment and run the command again:
+If `api-usage` says `OPENAI_ADMIN_KEY` is missing, set it for one run or for your current shell session, then run the command again:
 
 ```sh
+OPENAI_ADMIN_KEY="your-admin-key" ./codex_usage.py api-usage
+
+# Or for the current terminal session:
 export OPENAI_ADMIN_KEY="your-admin-key"
 ./codex_usage.py api-usage
 ```
