@@ -32,6 +32,7 @@ import sys
 import textwrap
 import unicodedata
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
@@ -43,8 +44,11 @@ CODEX_HOME = Path("~/.codex").expanduser()
 SCRIPT_DIR = Path(__file__).resolve().parent
 EXPORT_DIR = SCRIPT_DIR
 API_BASE = "https://chatgpt.com/backend-api"
+ADMIN_API_BASE = "https://api.openai.com/v1"
 ORIGINATOR = "Codex Desktop"
 USER_AGENT = "codex-usage-local-script/3.0"
+ADMIN_KEY_ENV = "OPENAI_ADMIN_KEY"
+ADMIN_MAX_PAGES = 10
 USAGE_FIELDS = [
     "input_tokens",
     "cached_input_tokens",
@@ -66,6 +70,16 @@ INTERESTING_ONLINE_KEY_RE = re.compile(
     r"(usage|token|credit|limit|remaining|reset|plan|tier|quota|rate|bucket|daily|lifetime|status|used|expires|renew|model|source)",
     re.I,
 )
+ADMIN_USAGE_GROUP_FIELDS = {
+    "project_id",
+    "user_id",
+    "api_key_id",
+    "model",
+    "batch",
+    "service_tier",
+}
+ADMIN_COST_GROUP_FIELDS = {"project_id", "line_item", "api_key_id"}
+ADMIN_IDENTIFIER_KEYS = {"api_key_id", "organization_id", "project_id", "user_id"}
 EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 ANSI = {
     "red": "\033[31m",
@@ -433,6 +447,58 @@ def fetch_json(
     return {"ok": True, "status": status, "data": data}
 
 
+def admin_api_key() -> str | None:
+    value = os.environ.get(ADMIN_KEY_ENV)
+    return value.strip() if value and value.strip() else None
+
+
+def build_admin_url(path: str, params: dict[str, Any]) -> str:
+    clean_params = {k: v for k, v in params.items() if v not in (None, "", [])}
+    query = urllib.parse.urlencode(clean_params, doseq=True)
+    url = ADMIN_API_BASE.rstrip("/") + "/" + path.lstrip("/")
+    return f"{url}?{query}" if query else url
+
+
+def fetch_admin_json(
+    path: str, params: dict[str, Any], admin_key: str, timeout: int = 25
+) -> dict[str, Any]:
+    req = urllib.request.Request(
+        build_admin_url(path, params),
+        headers={
+            "Authorization": f"Bearer {admin_key}",
+            "Content-Type": "application/json",
+            "User-Agent": USER_AGENT,
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            raw = response.read().decode("utf-8", "replace")
+            status = response.status
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", "replace")[:1000]
+        return {
+            "ok": False,
+            "status": exc.code,
+            "reason": exc.reason,
+            "body_excerpt": redact_admin(body),
+        }
+    except urllib.error.URLError as exc:
+        return {"ok": False, "error": f"Network error: {exc}"}
+    except TimeoutError:
+        return {"ok": False, "error": "Timed out whilst fetching Admin API data."}
+
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        return {
+            "ok": False,
+            "status": status,
+            "error": f"Response was not valid JSON: {exc}",
+            "body_excerpt": redact_admin(raw[:1000]),
+        }
+    return {"ok": True, "status": status, "data": data}
+
+
 def redact(value: Any, key: str | None = None) -> Any:
     if key and SENSITIVE_KEY_RE.search(key):
         return "[REDACTED]"
@@ -440,6 +506,32 @@ def redact(value: Any, key: str | None = None) -> Any:
         return {k: redact(v, str(k)) for k, v in value.items()}
     if isinstance(value, list):
         return [redact(v, key) for v in value]
+    if isinstance(value, str):
+        text = EMAIL_RE.sub("[REDACTED_EMAIL]", value)
+        if len(text) > 300:
+            return text[:297] + "…"
+        return text
+    return value
+
+
+def shorten_identifier(value: str, visible: int = 6) -> str:
+    if len(value) <= visible * 2 + 1:
+        return "[REDACTED_ID]"
+    return f"{value[:visible]}…{value[-visible:]}"
+
+
+def redact_admin(value: Any, key: str | None = None) -> Any:
+    key_text = str(key or "")
+    if key_text in ADMIN_IDENTIFIER_KEYS:
+        if value in (None, ""):
+            return value
+        return shorten_identifier(str(value))
+    if key and SENSITIVE_KEY_RE.search(key):
+        return "[REDACTED]"
+    if isinstance(value, dict):
+        return {k: redact_admin(v, str(k)) for k, v in value.items()}
+    if isinstance(value, list):
+        return [redact_admin(v, key) for v in value]
     if isinstance(value, str):
         text = EMAIL_RE.sub("[REDACTED_EMAIL]", value)
         if len(text) > 300:
@@ -1884,6 +1976,448 @@ def cmd_online_usage(args: argparse.Namespace) -> None:
         print_online_usage(data, top=args.top)
 
 
+def admin_bucket_limit(bucket_width: str, days: int) -> int:
+    buckets_per_day = {"1d": 1, "1h": 24, "1m": 1440}[bucket_width]
+    endpoint_max = {"1d": 31, "1h": 168, "1m": 1440}[bucket_width]
+    return min(max(1, days * buckets_per_day), endpoint_max)
+
+
+def admin_time_window(days: int) -> tuple[int, int]:
+    end_time = int(datetime.now(timezone.utc).timestamp())
+    start_time = end_time - (days * 86400)
+    return start_time, end_time
+
+
+def admin_usage_params(
+    days: int, bucket_width: str, limit: int | None, group_by: list[str]
+) -> tuple[dict[str, Any], list[str]]:
+    start_time, end_time = admin_time_window(days)
+    valid_group_by = [field for field in group_by if field in ADMIN_USAGE_GROUP_FIELDS]
+    skipped = [field for field in group_by if field not in ADMIN_USAGE_GROUP_FIELDS]
+    params: dict[str, Any] = {
+        "start_time": start_time,
+        "end_time": end_time,
+        "bucket_width": bucket_width,
+        "limit": limit or admin_bucket_limit(bucket_width, days),
+    }
+    if valid_group_by:
+        params["group_by"] = valid_group_by
+    notes = [
+        f"Ignored unsupported completions group_by value: {field}" for field in skipped
+    ]
+    return params, notes
+
+
+def admin_cost_params(
+    days: int, limit: int | None, group_by: list[str]
+) -> tuple[dict[str, Any], list[str]]:
+    start_time, end_time = admin_time_window(days)
+    valid_group_by = [field for field in group_by if field in ADMIN_COST_GROUP_FIELDS]
+    skipped = [field for field in group_by if field not in ADMIN_COST_GROUP_FIELDS]
+    params: dict[str, Any] = {
+        "start_time": start_time,
+        "end_time": end_time,
+        "bucket_width": "1d",
+        "limit": limit or min(max(1, days), 180),
+    }
+    if valid_group_by:
+        params["group_by"] = valid_group_by
+    notes = [f"Ignored unsupported costs group_by value: {field}" for field in skipped]
+    return params, notes
+
+
+def fetch_admin_pages(
+    path: str, params: dict[str, Any], admin_key: str
+) -> dict[str, Any]:
+    pages: list[dict[str, Any]] = []
+    data_rows: list[Any] = []
+    next_page: str | None = None
+    network_calls = 0
+
+    for _ in range(ADMIN_MAX_PAGES):
+        page_params = dict(params)
+        if next_page:
+            page_params["page"] = next_page
+        response = fetch_admin_json(path, page_params, admin_key)
+        network_calls += 1
+        if not response.get("ok"):
+            return {
+                "ok": False,
+                "path": path,
+                "error": response,
+                "network_calls_made": network_calls,
+            }
+        page_data = response.get("data")
+        if not isinstance(page_data, dict):
+            return {
+                "ok": False,
+                "path": path,
+                "error": {
+                    "ok": False,
+                    "status": response.get("status"),
+                    "error": "Admin API response was not a JSON object.",
+                },
+                "network_calls_made": network_calls,
+            }
+        pages.append(redact_admin(page_data))
+        rows = page_data.get("data")
+        if isinstance(rows, list):
+            data_rows.extend(rows)
+        next_page = page_data.get("next_page")
+        if not next_page:
+            break
+
+    return {
+        "ok": True,
+        "path": path,
+        "status": response.get("status"),
+        "network_calls_made": network_calls,
+        "pages_returned": len(pages),
+        "max_pages": ADMIN_MAX_PAGES,
+        "has_more": bool(next_page),
+        "next_page_redacted": bool(next_page),
+        "data": data_rows,
+    }
+
+
+def normalise_admin_buckets(
+    response: dict[str, Any], kind: str
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    buckets = response.get("data") if isinstance(response, dict) else []
+    if not isinstance(buckets, list):
+        return rows
+    for bucket in buckets:
+        if not isinstance(bucket, dict):
+            continue
+        results = (
+            bucket.get("results") if isinstance(bucket.get("results"), list) else []
+        )
+        for result in results:
+            if not isinstance(result, dict):
+                continue
+            base: dict[str, Any] = {
+                "kind": kind,
+                "start_time": bucket.get("start_time"),
+                "start_time_local": fmt_local_timestamp(bucket.get("start_time")),
+                "end_time": bucket.get("end_time"),
+                "end_time_local": fmt_local_timestamp(bucket.get("end_time")),
+            }
+            if kind == "usage":
+                input_tokens = int(result.get("input_tokens") or 0)
+                output_tokens = int(result.get("output_tokens") or 0)
+                base.update(
+                    {
+                        "input_tokens": input_tokens,
+                        "output_tokens": output_tokens,
+                        "input_cached_tokens": int(
+                            result.get("input_cached_tokens") or 0
+                        ),
+                        "input_audio_tokens": int(
+                            result.get("input_audio_tokens") or 0
+                        ),
+                        "output_audio_tokens": int(
+                            result.get("output_audio_tokens") or 0
+                        ),
+                        "num_model_requests": int(
+                            result.get("num_model_requests") or 0
+                        ),
+                        "total_tokens": input_tokens + output_tokens,
+                        "project_id": redact_admin(
+                            result.get("project_id"), "project_id"
+                        ),
+                        "user_id": redact_admin(result.get("user_id"), "user_id"),
+                        "api_key_id": redact_admin(
+                            result.get("api_key_id"), "api_key_id"
+                        ),
+                        "model": result.get("model"),
+                        "batch": result.get("batch"),
+                        "service_tier": result.get("service_tier"),
+                    }
+                )
+            else:
+                amount = (
+                    result.get("amount")
+                    if isinstance(result.get("amount"), dict)
+                    else {}
+                )
+                base.update(
+                    {
+                        "amount": amount.get("value"),
+                        "currency": amount.get("currency"),
+                        "line_item": result.get("line_item"),
+                        "project_id": redact_admin(
+                            result.get("project_id"), "project_id"
+                        ),
+                        "api_key_id": redact_admin(
+                            result.get("api_key_id"), "api_key_id"
+                        ),
+                        "quantity": redact_admin(result.get("quantity")),
+                    }
+                )
+            rows.append(base)
+    return rows
+
+
+def admin_group_label(row: dict[str, Any], fields: list[str]) -> str:
+    parts = []
+    for field in fields:
+        value = row.get(field)
+        if value not in (None, ""):
+            parts.append(f"{field}={value}")
+    return ", ".join(parts) if parts else "(all)"
+
+
+def collect_api_usage(args: argparse.Namespace) -> dict[str, Any]:
+    key = admin_api_key()
+    group_by = list(getattr(args, "group_by", []) or [])
+    days = int(args.days)
+    bucket_width = str(args.bucket_width)
+    limit = getattr(args, "limit", None)
+    out: dict[str, Any] = {
+        "retrieved_at_local": local_now_text(),
+        "ok": False,
+        "network_calls_made": 0,
+        "days": days,
+        "bucket_width": bucket_width,
+        "group_by": group_by,
+        "privacy_note": (
+            "Uses OPENAI_ADMIN_KEY from the environment. The key is never printed; "
+            "API key, organisation, project, and user identifiers are shortened."
+        ),
+        "notes": [],
+    }
+    if not key:
+        out["error"] = (
+            f"{ADMIN_KEY_ENV} is not set. Set it in your environment to use "
+            "the optional OpenAI Admin API report."
+        )
+        return out
+
+    usage_params, usage_notes = admin_usage_params(days, bucket_width, limit, group_by)
+    out["notes"].extend(usage_notes)
+    usage_response = fetch_admin_pages(
+        "/organization/usage/completions", usage_params, key
+    )
+    out["network_calls_made"] += usage_response.get("network_calls_made", 0)
+    out["usage"] = {
+        "ok": usage_response.get("ok"),
+        "path": usage_response.get("path"),
+        "params": redact_admin(usage_params),
+    }
+    if usage_response.get("ok"):
+        out["usage"].update(
+            {
+                "status": usage_response.get("status"),
+                "pages_returned": usage_response.get("pages_returned"),
+                "has_more": usage_response.get("has_more"),
+                "rows": normalise_admin_buckets(usage_response, "usage"),
+            }
+        )
+    else:
+        out["usage"]["error"] = redact_admin(usage_response.get("error"))
+
+    if getattr(args, "no_costs", False):
+        out["costs"] = {"ok": None, "skipped": True, "reason": "--no-costs was used."}
+    elif bucket_width != "1d":
+        out["costs"] = {
+            "ok": None,
+            "skipped": True,
+            "reason": "The OpenAI costs endpoint currently supports bucket_width=1d only.",
+        }
+    else:
+        cost_params, cost_notes = admin_cost_params(days, limit, group_by)
+        out["notes"].extend(cost_notes)
+        cost_response = fetch_admin_pages("/organization/costs", cost_params, key)
+        out["network_calls_made"] += cost_response.get("network_calls_made", 0)
+        out["costs"] = {
+            "ok": cost_response.get("ok"),
+            "path": cost_response.get("path"),
+            "params": redact_admin(cost_params),
+        }
+        if cost_response.get("ok"):
+            out["costs"].update(
+                {
+                    "status": cost_response.get("status"),
+                    "pages_returned": cost_response.get("pages_returned"),
+                    "has_more": cost_response.get("has_more"),
+                    "rows": normalise_admin_buckets(cost_response, "cost"),
+                }
+            )
+        else:
+            out["costs"]["error"] = redact_admin(cost_response.get("error"))
+
+    usage_ok = isinstance(out.get("usage"), dict) and out["usage"].get("ok") is True
+    costs = out.get("costs") if isinstance(out.get("costs"), dict) else {}
+    costs_ok = costs.get("ok") is True or costs.get("skipped") is True
+    out["ok"] = usage_ok and costs_ok
+    return out
+
+
+def admin_usage_totals(rows: list[dict[str, Any]]) -> dict[str, int]:
+    totals = Counter()
+    for row in rows:
+        for key in [
+            "input_tokens",
+            "output_tokens",
+            "input_cached_tokens",
+            "total_tokens",
+            "num_model_requests",
+        ]:
+            totals[key] += int(row.get(key) or 0)
+    return dict(totals)
+
+
+def print_api_usage(data: dict[str, Any], top: int) -> None:
+    section("OpenAI API Usage And Costs")
+    explain(
+        "This optional report calls the OpenAI Admin API for organisation-level API usage and costs. It is separate from ChatGPT, Codex subscription, reset-credit, and local Codex usage reports."
+    )
+    usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
+    costs = data.get("costs") if isinstance(data.get("costs"), dict) else {}
+    overview_rows = [
+        ["Retrieved", data.get("retrieved_at_local")],
+        ["Days", fmt_int(data.get("days"))],
+        ["Bucket width", data.get("bucket_width")],
+        ["Group by", ", ".join(data.get("group_by") or []) or "(none)"],
+        ["Network calls made", fmt_int(data.get("network_calls_made"))],
+        ["Usage status", "ok" if usage.get("ok") else "error"],
+        [
+            "Costs status",
+            "skipped"
+            if costs.get("skipped")
+            else ("ok" if costs.get("ok") else "error"),
+        ],
+        ["Privacy", "Admin key hidden; account identifiers shortened"],
+    ]
+    print_counter_table("Admin API report overview", ["Metric", "Value"], overview_rows)
+
+    if data.get("notes"):
+        print(colour("Notes", "yellow"))
+        for note in data["notes"]:
+            print(f"  • {note}")
+        print()
+
+    if not admin_api_key():
+        print_counter_table(
+            "Admin API key",
+            ["Setting", "Value"],
+            [
+                ["Required environment variable", ADMIN_KEY_ENV],
+                ["Status", data.get("error") or "missing"],
+            ],
+        )
+        return
+
+    if usage.get("ok"):
+        usage_rows = usage.get("rows") if isinstance(usage.get("rows"), list) else []
+        totals = admin_usage_totals(usage_rows)
+        print_counter_table(
+            "Completions usage totals",
+            ["Metric", "Value"],
+            [
+                ["Input tokens", fmt_int(totals.get("input_tokens"))],
+                ["Cached input tokens", fmt_int(totals.get("input_cached_tokens"))],
+                ["Output tokens", fmt_int(totals.get("output_tokens"))],
+                ["Total input + output tokens", fmt_int(totals.get("total_tokens"))],
+                ["Model requests", fmt_int(totals.get("num_model_requests"))],
+                ["Rows", fmt_int(len(usage_rows))],
+                ["Pages", fmt_int(usage.get("pages_returned"))],
+            ],
+        )
+        group_fields = [
+            field
+            for field in data.get("group_by", [])
+            if field in ADMIN_USAGE_GROUP_FIELDS
+        ]
+        rows = []
+        for row in sorted(
+            usage_rows,
+            key=lambda item: int(item.get("total_tokens") or 0),
+            reverse=True,
+        )[:top]:
+            rows.append(
+                [
+                    row.get("start_time_local") or "—",
+                    admin_group_label(row, group_fields),
+                    fmt_int(row.get("input_tokens")),
+                    fmt_int(row.get("output_tokens")),
+                    fmt_int(row.get("total_tokens")),
+                    fmt_int(row.get("num_model_requests")),
+                ]
+            )
+        print_counter_table(
+            f"Top completions usage rows, latest query ({len(rows)} shown)",
+            ["Bucket start", "Group", "Input", "Output", "Total", "Requests"],
+            rows,
+        )
+    else:
+        print_counter_table(
+            "Completions usage status",
+            ["Metric", "Value"],
+            [["Error", json.dumps(usage.get("error"), ensure_ascii=False)]],
+        )
+
+    if costs.get("skipped"):
+        print_counter_table(
+            "Costs status", ["Metric", "Value"], [["Skipped", costs.get("reason")]]
+        )
+    elif costs.get("ok"):
+        cost_rows = costs.get("rows") if isinstance(costs.get("rows"), list) else []
+        total_by_currency: Counter[str] = Counter()
+        for row in cost_rows:
+            currency = str(row.get("currency") or "unknown")
+            total_by_currency[currency] += float(row.get("amount") or 0.0)
+        print_counter_table(
+            "Cost totals",
+            ["Currency", "Amount"],
+            [
+                [currency.upper(), fmt_number(amount, decimals=4)]
+                for currency, amount in total_by_currency.items()
+            ],
+        )
+        group_fields = [
+            field
+            for field in data.get("group_by", [])
+            if field in ADMIN_COST_GROUP_FIELDS
+        ]
+        rows = []
+        for row in sorted(
+            cost_rows,
+            key=lambda item: numeric_sort_value(item.get("amount")),
+            reverse=True,
+        )[:top]:
+            rows.append(
+                [
+                    row.get("start_time_local") or "—",
+                    admin_group_label(row, group_fields),
+                    fmt_number(row.get("amount"), decimals=4),
+                    str(row.get("currency") or "—").upper(),
+                    str(row.get("line_item") or "—"),
+                ]
+            )
+        print_counter_table(
+            f"Top cost rows, latest query ({len(rows)} shown)",
+            ["Bucket start", "Group", "Amount", "Currency", "Line item"],
+            rows,
+        )
+    else:
+        print_counter_table(
+            "Costs status",
+            ["Metric", "Value"],
+            [["Error", json.dumps(costs.get("error"), ensure_ascii=False)]],
+        )
+
+
+def cmd_api_usage(args: argparse.Namespace) -> None:
+    set_colour_mode(getattr(args, "colour", None))
+    data = collect_api_usage(args)
+    if args.json:
+        print_json(data)
+    else:
+        print_api_usage(data, top=args.top)
+
+
 def collect_all(top_n: int) -> dict[str, Any]:
     return {
         "retrieved_at_local": local_now_text(),
@@ -1936,7 +2470,15 @@ def limit_local_usage_days(local_data: Any, days: int) -> None:
         sessions["daily_usage"] = daily_usage[-days:]
 
 
-def export_json(report: str, top: int, days: int) -> Any:
+def export_json(
+    report: str,
+    top: int,
+    days: int,
+    bucket_width: str = "1d",
+    limit: int | None = None,
+    group_by: list[str] | None = None,
+    no_costs: bool = False,
+) -> Any:
     if report == "resets":
         return collect_resets()
     if report == "local-usage":
@@ -1945,6 +2487,16 @@ def export_json(report: str, top: int, days: int) -> Any:
         return data
     if report == "online-usage":
         return collect_online_usage()
+    if report == "api-usage":
+        args = argparse.Namespace(
+            days=days,
+            top=top,
+            bucket_width=bucket_width,
+            limit=limit,
+            group_by=group_by or [],
+            no_costs=no_costs,
+        )
+        return collect_api_usage(args)
     data = collect_all(top)
     limit_local_usage_days(data.get("local_usage"), days)
     return data
@@ -1986,6 +2538,16 @@ def rows_for_csv(report: str, data: Any, top: int = 200) -> list[dict[str, Any]]
                             "value": value,
                         }
                     )
+    if report == "api-usage":
+        usage = data.get("usage", {}) if isinstance(data, dict) else {}
+        for row in usage.get("rows", []) if isinstance(usage, dict) else []:
+            rows.append({"section": "api_usage_completion", **row})
+        costs = data.get("costs", {}) if isinstance(data, dict) else {}
+        if isinstance(costs, dict):
+            for row in (
+                costs.get("rows", []) if isinstance(costs.get("rows"), list) else []
+            ):
+                rows.append({"section": "api_cost", **row})
     return rows
 
 
@@ -2011,25 +2573,44 @@ def export_path(report: str, fmt: str) -> Path:
     return path
 
 
-def export_report(report: str, fmt: str, top: int, days: int, warn_days: int) -> Path:
+def export_report(
+    report: str,
+    fmt: str,
+    top: int,
+    days: int,
+    warn_days: int,
+    bucket_width: str = "1d",
+    limit: int | None = None,
+    group_by: list[str] | None = None,
+    no_costs: bool = False,
+) -> Path:
     path = export_path(report, fmt)
     if fmt == "json":
-        data = export_json(report, top, days)
+        data = export_json(report, top, days, bucket_width, limit, group_by, no_costs)
         with path.open("x", encoding="utf-8") as handle:
             handle.write(json.dumps(data, indent=2, ensure_ascii=False))
             handle.write("\n")
     elif fmt == "csv":
-        data = export_json(report, top, days)
+        data = export_json(report, top, days, bucket_width, limit, group_by, no_costs)
         write_csv(path, rows_for_csv(report, data, top=top))
     elif fmt == "txt":
         args = argparse.Namespace(
-            json=False, top=top, days=days, warn_days=warn_days, colour="never"
+            json=False,
+            top=top,
+            days=days,
+            warn_days=warn_days,
+            colour="never",
+            bucket_width=bucket_width,
+            limit=limit,
+            group_by=group_by or [],
+            no_costs=no_costs,
         )
         funcs = {
             "all": cmd_all,
             "resets": cmd_resets,
             "local-usage": cmd_local_usage,
             "online-usage": cmd_online_usage,
+            "api-usage": cmd_api_usage,
         }
         text = render_text(funcs[report], args)
         with path.open("x", encoding="utf-8") as handle:
@@ -2041,7 +2622,17 @@ def export_report(report: str, fmt: str, top: int, days: int, warn_days: int) ->
 
 def cmd_export(args: argparse.Namespace) -> None:
     set_colour_mode(getattr(args, "colour", None))
-    path = export_report(args.report, args.format, args.top, args.days, args.warn_days)
+    path = export_report(
+        args.report,
+        args.format,
+        args.top,
+        args.days,
+        args.warn_days,
+        args.bucket_width,
+        args.limit,
+        args.group_by,
+        args.no_costs,
+    )
     print(f"Exported {args.report} report to: {path}")
 
 
@@ -2149,9 +2740,10 @@ def cmd_menu(args: argparse.Namespace) -> None:
             "2) Show reset credits only",
             "3) Show local usage only (no network calls)",
             "4) Show online usage/profile (GET only)",
-            "5) Export report",
-            f"6) Settings (top={top}, days={days}, warn_days={warn_days})",
-            "7) Refresh quick summary",
+            "5) Show OpenAI API usage/costs (Admin key)",
+            "6) Export report",
+            f"7) Settings (top={top}, days={days}, warn_days={warn_days})",
+            "8) Refresh quick summary",
             "q) Quit",
         ]
         quick_lines = (
@@ -2211,10 +2803,30 @@ def cmd_menu(args: argparse.Namespace) -> None:
             action()
             if after_report(action) == "quit":
                 return
-        elif choice in {"5", "e", "export"}:
+        elif choice in {"5", "api", "api-usage", "admin"}:
+
+            def action() -> None:
+                cmd_api_usage(
+                    argparse.Namespace(
+                        json=False,
+                        top=top,
+                        days=days,
+                        bucket_width="1d",
+                        limit=None,
+                        group_by=[],
+                        no_costs=False,
+                        colour=None,
+                    )
+                )
+
+            menu_clear()
+            action()
+            if after_report(action) == "quit":
+                return
+        elif choice in {"6", "e", "export"}:
             report = (
                 menu_read_choice(
-                    "Report [all/resets/local-usage/online-usage] (default all): "
+                    "Report [all/resets/local-usage/online-usage/api-usage] (default all): "
                 )
                 or "all"
             )
@@ -2224,6 +2836,7 @@ def cmd_menu(args: argparse.Namespace) -> None:
                 "resets",
                 "local-usage",
                 "online-usage",
+                "api-usage",
             } or fmt not in {"txt", "json", "csv"}:
                 print("Invalid report or format.")
                 quick_summary = None
@@ -2234,7 +2847,7 @@ def cmd_menu(args: argparse.Namespace) -> None:
             quick_summary = None
             quick_summary_error = None
             continue
-        elif choice in {"6", "s", "settings"}:
+        elif choice in {"7", "s", "settings"}:
             menu_show_settings_help(top, days, warn_days)
             new_top = menu_read_choice("\nNew top row limit (blank keeps current): ")
             new_days = menu_read_choice(
@@ -2263,7 +2876,7 @@ def cmd_menu(args: argparse.Namespace) -> None:
             except ValueError:
                 print("Please enter whole numbers, e.g. 10, 30, or 7.")
                 after_report(lambda: menu_show_settings_help(top, days, warn_days))
-        elif choice in {"7", "refresh-summary", "summary"}:
+        elif choice in {"8", "refresh-summary", "summary"}:
             quick_summary = None
             quick_summary_error = None
             continue
@@ -2313,9 +2926,55 @@ def add_common(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def add_api_usage_options(
+    parser: argparse.ArgumentParser, include_json: bool, include_top_days: bool
+) -> None:
+    if include_json:
+        parser.add_argument(
+            "--json", action="store_true", help="Print machine-readable JSON."
+        )
+    if include_top_days:
+        parser.add_argument(
+            "--top",
+            type=positive_int,
+            default=10,
+            help="Number of top rows to show or export. Must be at least 1. Default: 10.",
+        )
+        parser.add_argument(
+            "--days",
+            type=positive_int,
+            default=30,
+            help="Number of recent days to request. Must be at least 1. Default: 30.",
+        )
+    parser.add_argument(
+        "--bucket-width",
+        choices=["1d", "1h", "1m"],
+        default="1d",
+        help="OpenAI usage bucket width. Costs are available only with 1d. Default: 1d.",
+    )
+    parser.add_argument(
+        "--limit",
+        type=positive_int,
+        default=None,
+        help="Override the number of buckets requested from the Admin API.",
+    )
+    parser.add_argument(
+        "--group-by",
+        action="append",
+        choices=sorted(ADMIN_USAGE_GROUP_FIELDS | ADMIN_COST_GROUP_FIELDS),
+        default=[],
+        help="Group Admin API rows. Repeat for multiple fields.",
+    )
+    parser.add_argument(
+        "--no-costs",
+        action="store_true",
+        help="Skip the OpenAI costs endpoint and request usage only.",
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Show Codex reset credits, local usage metadata, and read-only online usage/profile data.",
+        description="Show Codex reset credits, local usage metadata, read-only online usage/profile data, and optional OpenAI API usage.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=textwrap.dedent("""\
             Examples:
@@ -2323,6 +2982,7 @@ def build_parser() -> argparse.ArgumentParser:
               ./codex_usage.py resets --warn-days 14
               ./codex_usage.py local-usage --top 20 --days 60
               ./codex_usage.py online-usage --top 5 --no-colour
+              ./codex_usage.py api-usage --group-by model --group-by project_id
               ./codex_usage.py export --report all --format txt
 
             Run './codex_usage.py <command> --help' for command-specific switches.
@@ -2433,13 +3093,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     online_usage.set_defaults(func=cmd_online_usage)
 
+    api_usage = subparsers.add_parser(
+        "api-usage",
+        help="Show optional OpenAI API organisation usage and costs with OPENAI_ADMIN_KEY.",
+    )
+    add_common(api_usage)
+    add_api_usage_options(api_usage, include_json=True, include_top_days=True)
+    api_usage.set_defaults(func=cmd_api_usage)
+
     export = subparsers.add_parser(
         "export", help="Export a report next to this script as TXT, JSON, or CSV."
     )
     add_common(export)
     export.add_argument(
         "--report",
-        choices=["all", "resets", "local-usage", "online-usage"],
+        choices=["all", "resets", "local-usage", "online-usage", "api-usage"],
         default="all",
         help="Report to export. Default: all.",
     )
@@ -2467,6 +3135,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=7,
         help="Warn when reset credits expire within this many days. Use 0 to disable soon-expiry warnings. Default: 7.",
     )
+    add_api_usage_options(export, include_json=False, include_top_days=False)
     export.set_defaults(func=cmd_export)
 
     return parser
