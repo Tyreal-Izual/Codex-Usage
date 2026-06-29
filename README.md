@@ -11,12 +11,12 @@ This is not an official OpenAI or Codex tool. It does not redeem credits, buy cr
 ## Requirements
 
 - Python 3.10 or newer.
-- macOS or Linux.
-- Local Codex state under `~/.codex` for `local-usage`.
-- A Codex login at `~/.codex/auth.json` and network access for `resets`, `online-usage`, `all` and menu quick summaries.
+- macOS, Linux or Windows.
+- Local Codex state under your Codex home directory for `local-usage`.
+- A Codex login at `auth.json` inside your Codex home directory and network access for `resets`, `online-usage`, `all` and menu quick summaries.
 - `OPENAI_ADMIN_KEY` with suitable organisation permissions for the optional `api-usage` report.
 
-No third-party Python packages are required. Windows is not supported because the script expects Unix-style paths, an executable shebang workflow and a Codex home at `~/.codex`.
+No third-party Python packages are required. By default, Codex Usage reads Codex data from `Path.home() / ".codex"`. Set `CODEX_HOME` to use a different Codex home directory.
 
 The source layout is deliberately small:
 
@@ -45,13 +45,39 @@ If you prefer not to mark the file executable, run it through Python:
 python3 codex_usage.py
 ```
 
+On Windows, open PowerShell in the folder that contains `codex_usage.py`, then run the script with the Python launcher:
+
+```powershell
+py -3 .\codex_usage.py
+py -3 .\codex_usage.py local-usage
+```
+
 You can check the script syntax before running it:
 
 ```sh
 python3 -m py_compile ./codex_usage.py
 ```
 
+PowerShell equivalent:
+
+```powershell
+py -3 -m py_compile .\codex_usage.py
+```
+
 The syntax check only verifies that Python can parse the script. It does not contact Codex and does not read your account data.
+
+If your Codex data is not in the default user-profile `.codex` directory, set `CODEX_HOME` before running the script:
+
+```sh
+CODEX_HOME="/path/to/codex-home" ./codex_usage.py local-usage
+```
+
+PowerShell equivalent:
+
+```powershell
+$env:CODEX_HOME = "C:\Users\you\.codex"
+py -3 .\codex_usage.py local-usage
+```
 
 ## Use The Reports
 
@@ -141,7 +167,7 @@ export OPENAI_ADMIN_KEY
 unset OPENAI_ADMIN_KEY
 ```
 
-For the current terminal session, the script only needs `OPENAI_ADMIN_KEY` to be exported before it starts. For regular use, load the value from your operating system's secret manager before you start the script, or export it from your shell profile, such as `~/.zshrc` or `~/.bashrc`. If you store it in a shell profile, treat that file as a credential. Do not put the key in this repository, screenshots, issues, commits, report exports, or `~/.codex/auth.json`.
+For the current terminal session, the script only needs `OPENAI_ADMIN_KEY` to be exported before it starts. For regular use, load the value from your operating system's secret manager before you start the script, or export it from your shell profile, such as `~/.zshrc` or `~/.bashrc`. If you store it in a shell profile, treat that file as a credential. Do not put the key in this repository, screenshots, issues, commits, report exports, or `<Codex home>/auth.json`.
 
 For copy/paste-friendly output, scripted checks or logs, disable terminal colour:
 
@@ -208,7 +234,7 @@ Shared display switches:
 | `--group-by FIELD` | Group rows by `project_id`, `user_id`, `api_key_id`, `model`, `batch`, `service_tier` or `line_item`. Repeat for multiple fields. Unsupported fields for a specific endpoint are ignored with a note. | none |
 | `--no-costs` | Skip the OpenAI costs endpoint and request completions usage only. | off |
 
-The menu and commands use the same display settings. `top` controls ranked-table length, such as top sessions or model usage. `days` controls how many recent calendar days appear in daily local-usage tables. `warn_days` controls how soon reset-credit expiry should produce a warning; use `0` to disable soon-expiry warnings. These settings affect display and export size only. They do not change Codex, your account or `~/.codex`.
+The menu and commands use the same display settings. `top` controls ranked-table length, such as top sessions or model usage. `days` controls how many recent calendar days appear in daily local-usage tables. `warn_days` controls how soon reset-credit expiry should produce a warning; use `0` to disable soon-expiry warnings. These settings affect display and export size only. They do not change Codex, your account, your Codex home directory or any server setting.
 
 ## Exports
 
@@ -256,16 +282,18 @@ The script never removes exported reports. If you export inside a Git checkout, 
 Codex Usage reuses your existing Codex login file:
 
 ```text
-~/.codex/auth.json
+<Codex home>/auth.json
 ```
+
+The Codex home directory is `Path.home() / ".codex"` unless `CODEX_HOME` is set. With the default location, macOS and Linux users still use `~/.codex/auth.json`; Windows users use the equivalent `.codex\auth.json` under their user profile.
 
 The script reads the access token and account ID from that file when it calls Codex/ChatGPT backend endpoints. It does not print them, and the core reports do not need an OpenAI API key.
 
 Online responses are redacted before display or export. Token-like and identity-like fields are filtered by sensitive field name, including access tokens, refresh tokens, ID tokens, authorisation headers, cookies, session values, account IDs, email fields, phone fields, passwords and secrets. Email addresses inside string values are also redacted.
 
-Local usage mode reads metadata and counters from `~/.codex`. It avoids prompt text, assistant text, command text, diffs, transcripts and secret contents.
+Local usage mode reads metadata and counters from your Codex home directory. It avoids prompt text, assistant text, command text, diffs, transcripts and secret contents.
 
-The optional `api-usage` report reads `OPENAI_ADMIN_KEY` from the environment. It does not accept the key as a command-line argument, does not read it from `~/.codex/auth.json`, and does not print or export it. API key IDs, organisation IDs, project IDs and user IDs are shortened before display or export. Do not include real Admin keys, raw billing responses or private account identifiers in issues, screenshots, fixtures or commits.
+The optional `api-usage` report reads `OPENAI_ADMIN_KEY` from the environment. It does not accept the key as a command-line argument, does not read it from `<Codex home>/auth.json`, and does not print or export it. API key IDs, organisation IDs, project IDs and user IDs are shortened before display or export. Do not include real Admin keys, raw billing responses or private account identifiers in issues, screenshots, fixtures or commits.
 
 ## Network Behaviour
 
@@ -303,7 +331,9 @@ If `./codex_usage.py` says permission is denied, make it executable:
 chmod +x codex_usage.py
 ```
 
-If the script says `~/.codex/auth.json` is missing or malformed, sign in to Codex first, then run the script again. Codex Usage reuses that existing login; the core reports do not ask for, store or need an OpenAI API key.
+If the script says `<Codex home>/auth.json` is missing or malformed, sign in to Codex first, then run the script again. Codex Usage reuses that existing login; the core reports do not ask for, store or need an OpenAI API key.
+
+By default, `<Codex home>` is `Path.home() / ".codex"`, so the default auth file remains `~/.codex/auth.json` on macOS/Linux and the equivalent `.codex\auth.json` directory under the user profile on Windows. If your Codex data is stored somewhere else, set `CODEX_HOME` to that directory before running the script.
 
 If `api-usage` says `OPENAI_ADMIN_KEY` is missing, set it for one run or for your current shell session, then run the command again:
 
@@ -351,7 +381,7 @@ pyflakes ./codex_usage.py
 python3 codex_usage.py --help
 ```
 
-Do not include access tokens, `~/.codex/auth.json`, exported reports, raw backend responses, local transcripts, private prompts, private paths or account data in issues, commits, fixtures or screenshots.
+Do not include access tokens, `<Codex home>/auth.json`, exported reports, raw backend responses, local transcripts, private prompts, private paths or account data in issues, commits, fixtures or screenshots.
 
 Do not include `OPENAI_ADMIN_KEY`, raw Admin API billing responses, API key IDs, organisation IDs, project IDs or user IDs in issues, commits, fixtures or screenshots.
 

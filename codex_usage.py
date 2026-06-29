@@ -11,9 +11,10 @@ A single-file command-line tool for Codex users. It shows reset credits,
 rate-limit windows, local usage metadata, read-only online usage/profile data,
 and report exports beside the script.
 
-It uses the existing Codex login at ~/.codex/auth.json. It does not require an
-OpenAI API key. It does not print auth tokens, account IDs, email addresses,
-prompts, assistant replies, commands, diffs, transcripts, or secrets.
+It uses the existing Codex login at auth.json inside the Codex home directory.
+It does not require an OpenAI API key. It does not print auth tokens, account
+IDs, email addresses, prompts, assistant replies, commands, diffs, transcripts,
+or secrets.
 """
 
 from __future__ import annotations
@@ -39,8 +40,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
-AUTH_PATH = Path("~/.codex/auth.json").expanduser()
-CODEX_HOME = Path("~/.codex").expanduser()
+
+def resolve_codex_home() -> Path:
+    codex_home = os.environ.get("CODEX_HOME")
+    if codex_home:
+        return Path(codex_home).expanduser()
+    return Path.home() / ".codex"
+
+
+CODEX_HOME = resolve_codex_home()
+AUTH_PATH = CODEX_HOME / "auth.json"
 SCRIPT_DIR = Path(__file__).resolve().parent
 EXPORT_DIR = SCRIPT_DIR
 API_BASE = "https://chatgpt.com/backend-api"
@@ -2690,7 +2699,8 @@ def menu_show_settings_help(top: int, days: int, warn_days: int) -> None:
     section("Display Settings")
     print("These settings only affect how much information the menu shows during this")
     print(
-        "run. They do not change Codex, your account, ~/.codex, or any server setting."
+        "run. They do not change Codex, your account, your Codex home directory,"
+        " or any server setting."
     )
     print()
     print_kv("Current top", top)
