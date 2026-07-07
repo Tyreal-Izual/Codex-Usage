@@ -1,3 +1,7 @@
+<p align="right">
+  <strong>English</strong> | <a href="README.zh-CN.md">中文</a>
+</p>
+
 # Codex Usage
 
 A fork of [MacSteini/Codex-Usage](https://github.com/MacSteini/Codex-Usage)
@@ -46,9 +50,8 @@ redistributing this project.
 - SQLite model counter chart with stacked token share and per-model table.
 - Local token totals and top local sessions.
 - Optional OpenAI Admin API usage and costs through `OPENAI_ADMIN_KEY`.
-- CLI reports for `all`, `resets`, `local-usage`, `online-usage`, and
-  `api-usage`.
-- TXT, JSON, and CSV exports from the CLI.
+- Original CLI reports and exports remain available; see
+  [README_OLD.md](README_OLD.md) for the full CLI guide.
 
 ## Requirements
 
@@ -106,75 +109,22 @@ python3 codex_usage_web.py --host 127.0.0.1 --port 8765
 The dashboard binds to `127.0.0.1` by default, so it is intended for local use
 on your own machine.
 
-## Quick Start: CLI
+## Original CLI
 
-Run the original command-line interface:
-
-```sh
-python3 codex_usage.py
-```
-
-Or make it executable:
-
-```sh
-chmod +x codex_usage.py
-./codex_usage.py
-```
-
-Show everything:
-
-```sh
-./codex_usage.py all
-```
-
-Show local usage only, with no network calls:
-
-```sh
-./codex_usage.py local-usage
-```
-
-Show reset credits:
-
-```sh
-./codex_usage.py resets
-```
-
-Show online usage/profile data:
-
-```sh
-./codex_usage.py online-usage
-```
-
-Show optional OpenAI Admin API usage and costs:
-
-```sh
-export OPENAI_ADMIN_KEY="your-admin-key"
-./codex_usage.py api-usage
-```
-
-Print machine-readable JSON:
-
-```sh
-./codex_usage.py all --json
-```
-
-Export a report:
-
-```sh
-./codex_usage.py export --report all --format txt
-./codex_usage.py export --report all --format json
-./codex_usage.py export --report local-usage --format csv
-```
+The original command-line interface remains available as `codex_usage.py` and
+is still the core collector/reporting implementation used by the dashboard.
+For CLI setup, commands, exports, authentication notes, and troubleshooting,
+see the preserved [old README](README_OLD.md).
 
 ## Reports
 
-| Report | Web | CLI | Network |
-| --- | --- | --- | --- |
-| Overview | `report=all` | `./codex_usage.py all` | Yes |
-| Reset credits | `report=resets` | `./codex_usage.py resets` | Yes |
-| Local usage | `report=local-usage` | `./codex_usage.py local-usage` | No |
-| Online usage/profile | `report=online-usage` | `./codex_usage.py online-usage` | Yes |
-| OpenAI API usage/costs | `report=api-usage` | `./codex_usage.py api-usage` | Yes, needs `OPENAI_ADMIN_KEY` |
+| Report | Dashboard/API value | Network |
+| --- | --- | --- |
+| Overview | `report=all` | Yes |
+| Reset credits | `report=resets` | Yes |
+| Local usage | `report=local-usage` | No |
+| Online usage/profile | `report=online-usage` | Yes |
+| OpenAI API usage/costs | `report=api-usage` | Yes, needs `OPENAI_ADMIN_KEY` |
 
 ## Dashboard API
 
@@ -209,17 +159,18 @@ Common query parameters:
 
 <!-- markdownlint-disable MD033 -- HTML is used here so GitHub can render bounded thumbnails that link to the full-size screenshots. -->
 <p>
-  <a href="https://github.com/MacSteini/Codex-Usage/blob/main/img/1.png"><img src="img/1.png" alt="Codex Usage screenshot 1" width="220"></a>
-  <a href="https://github.com/MacSteini/Codex-Usage/blob/main/img/2.png"><img src="img/2.png" alt="Codex Usage screenshot 2" width="220"></a>
-  <a href="https://github.com/MacSteini/Codex-Usage/blob/main/img/3.png"><img src="img/3.png" alt="Codex Usage screenshot 3" width="220"></a>
-  <a href="https://github.com/MacSteini/Codex-Usage/blob/main/img/4.png"><img src="img/4.png" alt="Codex Usage screenshot 4" width="220"></a>
-  <a href="https://github.com/MacSteini/Codex-Usage/blob/main/img/5.png"><img src="img/5.png" alt="Codex Usage screenshot 5" width="220"></a>
-  <a href="https://github.com/MacSteini/Codex-Usage/blob/main/img/6.png"><img src="img/6.png" alt="Codex Usage screenshot 6" width="220"></a>
+  <a href="img/dashboard/1.png"><img src="img/dashboard/1.png" alt="Codex Usage web dashboard screenshot 1" width="220"></a>
+  <a href="img/dashboard/2.png"><img src="img/dashboard/2.png" alt="Codex Usage web dashboard screenshot 2" width="220"></a>
+  <a href="img/dashboard/3.png"><img src="img/dashboard/3.png" alt="Codex Usage web dashboard screenshot 3" width="220"></a>
+  <a href="img/dashboard/4.png"><img src="img/dashboard/4.png" alt="Codex Usage web dashboard screenshot 4" width="220"></a>
+  <a href="img/dashboard/5.png"><img src="img/dashboard/5.png" alt="Codex Usage web dashboard screenshot 5" width="220"></a>
+  <a href="img/dashboard/6.png"><img src="img/dashboard/6.png" alt="Codex Usage web dashboard screenshot 6" width="220"></a>
 </p>
 <!-- markdownlint-enable MD033 -->
 
 ## Documentation
 
+- [README.zh-CN.md](README.zh-CN.md): Chinese version of this README.
 - [WEB_DASHBOARD.md](WEB_DASHBOARD.md): details for the local web dashboard.
 - [README_OLD.md](README_OLD.md): the original long-form README for the
   CLI-focused version.
