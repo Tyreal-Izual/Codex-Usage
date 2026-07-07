@@ -387,6 +387,31 @@ INDEX_HTML = r"""<!doctype html>
       width: 16%;
     }
 
+    .reset-credits-table th:nth-child(1),
+    .reset-credits-table td:nth-child(1) {
+      width: 7%;
+    }
+
+    .reset-credits-table th:nth-child(2),
+    .reset-credits-table td:nth-child(2) {
+      width: 15%;
+    }
+
+    .reset-credits-table th:nth-child(3),
+    .reset-credits-table td:nth-child(3) {
+      width: 30%;
+    }
+
+    .reset-credits-table th:nth-child(4),
+    .reset-credits-table td:nth-child(4) {
+      width: 18%;
+    }
+
+    .reset-credits-table th:nth-child(5),
+    .reset-credits-table td:nth-child(5) {
+      width: 30%;
+    }
+
     .pill {
       display: inline-flex;
       align-items: center;
@@ -728,8 +753,6 @@ INDEX_HTML = r"""<!doctype html>
         plan: "Plan",
         allowed: "Allowed",
         limitReached: "Limit reached",
-        primaryLeft: "Primary left",
-        weeklyLeft: "Weekly left",
         primaryResetsIn: "Primary resets in",
         weeklyResetsIn: "Weekly resets in",
         creditsBalance: "Credits balance",
@@ -841,8 +864,6 @@ INDEX_HTML = r"""<!doctype html>
         plan: "套餐",
         allowed: "是否允许",
         limitReached: "是否达到限制",
-        primaryLeft: "Primary 剩余",
-        weeklyLeft: "Weekly 剩余",
         primaryResetsIn: "Primary 重置倒计时",
         weeklyResetsIn: "Weekly 重置倒计时",
         creditsBalance: "额度余额",
@@ -1277,7 +1298,7 @@ INDEX_HTML = r"""<!doctype html>
         [esc(t("creditsReturned")), esc(fmtNumber(resets.credits_returned))],
         [esc(t("totalEarnedCount")), esc(fmtNumber(resets.total_earned_count))]
       ]);
-      const credits = table(["#", t("status"), t("expiresLocally"), t("timeRemaining"), t("grantedLocally")], rows);
+      const credits = table(["#", t("status"), t("expiresLocally"), t("timeRemaining"), t("grantedLocally")], rows, [], "reset-credits-table");
       return [panel(t("resetCredits"), t("resetSubtitle"), overview + credits, true)];
     }
 
@@ -1333,8 +1354,6 @@ INDEX_HTML = r"""<!doctype html>
         [esc(t("plan")), esc(rate.plan_type || "-")],
         [esc(t("allowed")), esc(get(rate, ["rate_limit", "allowed"], "-"))],
         [esc(t("limitReached")), esc(get(rate, ["rate_limit", "limit_reached"], "-"))],
-        [esc(t("primaryLeft")), esc(fmtPercent(limitLeft(primary)))],
-        [esc(t("weeklyLeft")), esc(fmtPercent(limitLeft(weekly)))],
         [esc(t("primaryResetsIn")), esc(fmtDurationSeconds(primaryReset))],
         [esc(t("weeklyResetsIn")), esc(fmtDurationSeconds(weeklyReset))],
         [esc(t("creditsBalance")), esc(fmtNumber(get(rate, ["credits", "balance"])))],
