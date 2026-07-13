@@ -10,7 +10,7 @@ one page.
 
 It includes a dashboard plus focused Codex and Claude Code collectors:
 
-- `codex_usage_web.py`: the added local dark-mode web dashboard with auto-refresh,
+- `codex_claude_usage_web.py`: the added local dark-mode web dashboard with auto-refresh,
   English/Chinese language switching, rate-limit bars, daily heatmap, and model
   usage charts.
 - `codex_usage.py`: the original upstream command-line tool and the core
@@ -36,7 +36,7 @@ the Codex usage reports. For the original CLI-focused project description and
 usage guide, see the preserved [old README](README_OLD.md).
 
 The changes in this fork mainly add a local, auto-refreshing browser dashboard
-in `codex_usage_web.py`, plus supporting documentation. The original CLI remains
+in `codex_claude_usage_web.py`, plus supporting documentation. The original CLI remains
 available and is still the foundation for the dashboard data.
 
 The upstream project is distributed under the MIT License. Keep the copyright
@@ -90,7 +90,7 @@ Set `CODEX_HOME` if your Codex data lives somewhere else.
 Run this from the repository directory:
 
 ```sh
-python3 codex_usage_web.py
+python3 codex_claude_usage_web.py
 ```
 
 Open:
@@ -104,7 +104,7 @@ Stop the server with `Ctrl-C` in the terminal.
 If port `8765` is already in use, choose another port:
 
 ```sh
-python3 codex_usage_web.py --port 8766
+python3 codex_claude_usage_web.py --port 8766
 ```
 
 Then open:
@@ -116,9 +116,9 @@ http://127.0.0.1:8766
 Useful dashboard options:
 
 ```sh
-python3 codex_usage_web.py --refresh 30
-python3 codex_usage_web.py --quiet
-python3 codex_usage_web.py --host 127.0.0.1 --port 8765
+python3 codex_claude_usage_web.py --refresh 30
+python3 codex_claude_usage_web.py --quiet
+python3 codex_claude_usage_web.py --host 127.0.0.1 --port 8765
 ```
 
 The dashboard binds to `127.0.0.1` by default, so it is intended for local use
@@ -151,14 +151,14 @@ python3 claude_usage_statusline.py --uninstall
 Set `CLAUDE_CONFIG_DIR` when Claude Code uses a non-default data directory. Set
 `CLAUDE_USAGE_SNAPSHOT` only when the snapshot should live at a custom path.
 
-## Isambard Status And Planned Maintenance
+## Isambard Status and Planned Maintenance
 
-In the overview, `Online rate limits` is the first panel and `Isambard service
-status` is the second. You can also choose **Isambard service status** from the
+In the overview, `Codex Online Rate Limits` is the first panel and `Isambard Service
+Status` is the second. You can also choose **Isambard Service Status** from the
 Report selector to focus on that data alone.
 
 The Isambard panel shows the current service cards plus source metadata. Its
-**Planned maintenance** item is a link to the full local schedule page:
+**Planned Maintenance** item is a link to the full local schedule page:
 
 ```text
 http://127.0.0.1:8765/isambard-maintenance
@@ -167,7 +167,7 @@ http://127.0.0.1:8765/isambard-maintenance
 The normal dashboard refresh uses a local cache for up to five minutes, so it
 does not repeatedly poll the public Isambard site. While viewing the overview
 or Isambard report, use the dashboard's manual **Refresh** button or the
-maintenance page's **Refresh source** button to fetch the two public source
+maintenance page's **Refresh Source** button to fetch the two public source
 pages immediately. If a fresh request fails, the dashboard
 keeps displaying the last successful result and shows a warning.
 
@@ -181,7 +181,7 @@ see the preserved [old README](README_OLD.md).
 ## Reports
 
 The **Overview** shows the high-level Codex and Claude Code rate-limit and
-model summaries. Use the link beneath **Codex models** or **Claude Code models**
+model summaries. Use the link beneath **Codex Models** or **Claude Code Models**
 to open the corresponding detail view. The Codex detail view includes reset
 credits, profile statistics, local totals, daily usage, top sessions, and the
 optional Admin API panels. The Claude Code detail view includes local totals,
@@ -190,9 +190,9 @@ daily usage, projects, and top sessions.
 | Report | Dashboard/API value | Network |
 | --- | --- | --- |
 | Overview | `report=all` | Yes |
-| Codex usage | `report=codex-usage` | Yes; includes reset credits, local/online usage, and optional Admin API usage/costs |
-| Claude Code usage | `report=claude-usage` | No |
-| Isambard service status | `report=isambard-status` | Yes, public pages; cached locally |
+| Codex Usage | `report=codex-usage` | Yes; includes reset credits, local/online usage, and optional Admin API usage/costs |
+| Claude Code Usage | `report=claude-usage` | No |
+| Isambard Service Status | `report=isambard-status` | Yes, public pages; cached locally |
 
 ## Dashboard API
 
@@ -230,11 +230,11 @@ Common query parameters:
 <!-- markdownlint-disable MD033 -- HTML is used here so GitHub can render bounded thumbnails that link to the full-size screenshots. -->
 <p>
   <a href="img/dashboard/1.png"><img src="img/dashboard/1.png" alt="Overview with Codex and Claude Code rate limits" width="220"></a>
-  <a href="img/dashboard/2.png"><img src="img/dashboard/2.png" alt="Overview with service status and model detail links" width="220"></a>
-  <a href="img/dashboard/3.png"><img src="img/dashboard/3.png" alt="Codex usage detail view" width="220"></a>
-  <a href="img/dashboard/4.png"><img src="img/dashboard/4.png" alt="Codex local daily usage and reset credits" width="220"></a>
-  <a href="img/dashboard/5.png"><img src="img/dashboard/5.png" alt="Claude Code usage detail view" width="220"></a>
-  <a href="img/dashboard/6.png"><img src="img/dashboard/6.png" alt="Isambard service status in Chinese" width="220"></a>
+  <a href="img/dashboard/2.png"><img src="img/dashboard/2.png" alt="Overview with Service Status and Model Detail Links" width="220"></a>
+  <a href="img/dashboard/3.png"><img src="img/dashboard/3.png" alt="Codex Usage Detail View" width="220"></a>
+  <a href="img/dashboard/4.png"><img src="img/dashboard/4.png" alt="Codex Daily Local Usage and Reset Credits" width="220"></a>
+  <a href="img/dashboard/5.png"><img src="img/dashboard/5.png" alt="Claude Code Usage Detail View" width="220"></a>
+  <a href="img/dashboard/6.png"><img src="img/dashboard/6.png" alt="Isambard Service Status in Chinese" width="220"></a>
 </p>
 <!-- markdownlint-enable MD033 -->
 

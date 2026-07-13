@@ -853,9 +853,9 @@ INDEX_HTML = r"""<!doctype html>
         <span data-i18n="report">Report</span>
         <select id="report">
           <option value="all" data-i18n="reportAll">Overview: Codex + Claude Code</option>
-          <option value="codex-usage" data-i18n="reportCodex">Codex usage</option>
-          <option value="claude-usage" data-i18n="reportClaude">Claude Code usage</option>
-          <option value="isambard-status" data-i18n="reportIsambard">Isambard service status</option>
+          <option value="codex-usage" data-i18n="reportCodex">Codex Usage</option>
+          <option value="claude-usage" data-i18n="reportClaude">Claude Code Usage</option>
+          <option value="isambard-status" data-i18n="reportIsambard">Isambard Service Status</option>
         </select>
       </label>
       <label>
@@ -866,20 +866,20 @@ INDEX_HTML = r"""<!doctype html>
         </select>
       </label>
       <label>
-        <span data-i18n="topRows">Top rows</span>
+        <span data-i18n="topRows">Top Rows</span>
         <input id="top" type="number" min="1" max="100" value="10">
       </label>
       <label>
-        <span data-i18n="localDays">Local days</span>
+        <span data-i18n="localDays">Local Days</span>
         <input id="days" type="number" min="1" max="365" value="30">
       </label>
       <label>
-        <span data-i18n="refreshSec">Refresh sec</span>
+        <span data-i18n="refreshSec">Refresh Seconds</span>
         <input id="refresh" type="number" min="3" max="3600" value="__DEFAULT_REFRESH__">
       </label>
       <label class="toggle">
         <input id="auto" type="checkbox" checked>
-        <span data-i18n="autoRefresh">Auto refresh</span>
+        <span data-i18n="autoRefresh">Auto Refresh</span>
       </label>
       <button id="refresh-now" type="button" data-i18n="refresh">Refresh</button>
     </div>
@@ -908,21 +908,21 @@ INDEX_HTML = r"""<!doctype html>
         statusWaiting: "Waiting for the first refresh.",
         report: "Report",
         reportAll: "Overview: Codex + Claude Code",
-        reportCodex: "Codex usage",
-        reportClaude: "Claude Code usage",
-        reportIsambard: "Isambard service status",
+        reportCodex: "Codex Usage",
+        reportClaude: "Claude Code Usage",
+        reportIsambard: "Isambard Service Status",
         language: "Language",
-        topRows: "Top rows",
-        localDays: "Local days",
-        refreshSec: "Refresh sec",
-        autoRefresh: "Auto refresh",
+        topRows: "Top Rows",
+        localDays: "Local Days",
+        refreshSec: "Refresh Seconds",
+        autoRefresh: "Auto Refresh",
         refresh: "Refresh",
         refreshing: "Refreshing",
         refreshingDetail: "Reading Codex, Claude Code, and selected online endpoints.",
-        upToDate: "Up to date",
-        loadedWithNotes: "Loaded with notes",
-        lastRefresh: "Last refresh",
-        refreshFailed: "Refresh failed",
+        upToDate: "Up to Date",
+        loadedWithNotes: "Loaded With Notes",
+        lastRefresh: "Last Refresh",
+        refreshFailed: "Refresh Failed",
         refreshFailedDetail: "See the message below the controls.",
         metric: "Metric",
         value: "Value",
@@ -935,119 +935,119 @@ INDEX_HTML = r"""<!doctype html>
         hr: "hr",
         min: "min",
         left: "left",
-        sessions: "sessions",
-        output: "output",
-        totalTokensWindow: "total tokens in this window",
-        busiestDay: "Busiest day",
+        sessions: "Sessions",
+        output: "Output",
+        totalTokensWindow: "Total Tokens in This Window",
+        busiestDay: "Busiest Day",
         less: "Less",
         more: "More",
-        totalTokens: "total tokens",
-        resetCredits: "Codex Reset credits",
+        totalTokens: "Total Tokens",
+        resetCredits: "Codex Reset Credits",
         resetSubtitle: "Read-only Codex reset endpoint",
         retrieved: "Retrieved",
-        availableResets: "Available resets",
-        creditsReturned: "Credits returned",
-        totalEarnedCount: "Total earned count",
+        availableResets: "Available Resets",
+        creditsReturned: "Credits Returned",
+        totalEarnedCount: "Total Earned Count",
         status: "Status",
-        expiresLocally: "Expires locally",
-        timeRemaining: "Time remaining",
-        grantedLocally: "Granted locally",
-        localTokenTotals: "Codex local token totals",
+        expiresLocally: "Expires Locally",
+        timeRemaining: "Time Remaining",
+        grantedLocally: "Granted Locally",
+        localTokenTotals: "Codex Local Token Totals",
         localTokenSubtitle: "Final counters from local session files",
-        sqliteModelCounters: "Codex models",
+        sqliteModelCounters: "Codex Models",
         sqliteSubtitle: "Local thread database",
-        dailyLocalUsage: "Codex daily local usage",
-        dayWindow: "day window",
-        topSessions: "Codex Top sessions",
+        dailyLocalUsage: "Codex Daily Local Usage",
+        dayWindow: "Day Window",
+        topSessions: "Codex Top Sessions",
         topSessionsSubtitle: "Largest local session counters",
         field: "Field",
         total: "Total",
         model: "Model",
-        models: "models",
+        models: "Models",
         threads: "Threads",
-        tokensUsed: "Tokens used",
+        tokensUsed: "Tokens Used",
         share: "Share",
         date: "Date",
         project: "Project",
-        sessionFile: "Session file",
-        onlineRateLimits: "Codex online rate limits",
+        sessionFile: "Session File",
+        onlineRateLimits: "Codex Online Rate Limits",
         onlineSubtitle: "Read-only backend endpoints",
-        primaryWindow: "Primary window",
-        weeklyWindow: "Weekly window",
+        primaryWindow: "Primary Window",
+        weeklyWindow: "Weekly Window",
         primaryHint: "Available before the primary limit is reached",
         weeklyHint: "Available before the weekly limit is reached",
         plan: "Plan",
-        limitReached: "Limit reached",
-        resetsIn: "Resets in",
-        creditsBalance: "Credits balance",
-        hasCredits: "Has credits",
-        profileStatistics: "Codex Profile statistics",
+        limitReached: "Limit Reached",
+        resetsIn: "Resets In",
+        creditsBalance: "Credits Balance",
+        hasCredits: "Has Credits",
+        profileStatistics: "Codex Profile Statistics",
         profileSubtitle: "Redacted profile data",
-        lifetimeTokens: "Lifetime tokens",
-        peakDailyTokens: "Peak daily tokens",
-        mostUsedReasoningEffort: "Most used reasoning effort",
-        reasoningEffortShare: "Reasoning effort share",
-        adminApiStatus: "Admin API status",
+        lifetimeTokens: "Lifetime Tokens",
+        peakDailyTokens: "Peak Daily Tokens",
+        mostUsedReasoningEffort: "Most-Used Reasoning Effort",
+        reasoningEffortShare: "Reasoning Effort Share",
+        adminApiStatus: "Admin API Status",
         adminApiSubtitle: "Uses OPENAI_ADMIN_KEY when set",
-        completionsUsage: "Completions usage",
+        completionsUsage: "Completions Usage",
         adminApi: "OpenAI Admin API",
         costs: "Costs",
         days: "Days",
-        bucketWidth: "Bucket width",
-        usageStatus: "Usage status",
-        costsStatus: "Costs status",
+        bucketWidth: "Bucket Width",
+        usageStatus: "Usage Status",
+        costsStatus: "Costs Status",
         error: "Error",
-        bucketStart: "Bucket start",
+        bucketStart: "Bucket Start",
         group: "Group",
         input: "Input",
         requests: "Requests",
         amount: "Amount",
         currency: "Currency",
-        lineItem: "Line item",
-        inputTokens: "Input tokens",
-        cachedInputTokens: "Cached input tokens",
-        outputTokens: "Output tokens",
-        reasoningOutputTokens: "Reasoning output tokens",
-        claudeRateLimits: "Claude Code rate limits",
+        lineItem: "Line Item",
+        inputTokens: "Input Tokens",
+        cachedInputTokens: "Cached Input Tokens",
+        outputTokens: "Output Tokens",
+        reasoningOutputTokens: "Reasoning Output Tokens",
+        claudeRateLimits: "Claude Code Rate Limits",
         claudeRateSubtitle: "Official statusLine snapshot for Claude.ai subscribers",
-        claudeFiveHour: "5-hour window",
-        claudeWeekly: "7-day window",
+        claudeFiveHour: "5-Hour Window",
+        claudeWeekly: "7-Day Window",
         claudeFiveHourHint: "Available before the Claude 5-hour limit is reached",
         claudeWeeklyHint: "Available before the Claude weekly limit is reached",
-        claudeSnapshotAge: "Snapshot age",
-        claudeSnapshotState: "Snapshot state",
+        claudeSnapshotAge: "Snapshot Age",
+        claudeSnapshotState: "Snapshot State",
         claudeFresh: "Fresh",
         claudeStale: "Stale",
-        claudeCapture: "statusLine capture",
+        claudeCapture: "Status Line Capture",
         claudeInstalled: "Installed",
-        claudeNotInstalled: "Not installed",
+        claudeNotInstalled: "Not Installed",
         claudeSetupTitle: "Claude rate-limit capture is not ready",
         claudeSetupHint: "Run this command once, then complete one Claude Code response:",
-        claudeLocalTokens: "Claude Code local token totals",
+        claudeLocalTokens: "Claude Code Local Token Totals",
         claudeLocalSubtitle: "Deduplicated assistant usage records from local JSONL files",
-        cacheCreationTokens: "Cache creation tokens",
-        cacheReadTokens: "Cache read tokens",
-        uniqueRequests: "Unique requests",
-        duplicateRowsSkipped: "Duplicate rows skipped",
-        claudeModels: "Claude Code models",
+        cacheCreationTokens: "Cache Creation Tokens",
+        cacheReadTokens: "Cache Read Tokens",
+        uniqueRequests: "Unique Requests",
+        duplicateRowsSkipped: "Duplicate Rows Skipped",
+        claudeModels: "Claude Code Models",
         claudeModelsSubtitle: "Token totals grouped by model",
         viewClaudeDetails: "View full Claude Code details →",
         viewCodexDetails: "View full Codex details →",
-        claudeProjects: "Claude Code projects",
+        claudeProjects: "Claude Code Projects",
         claudeProjectsSubtitle: "Highest local token totals by project",
-        claudeDailyUsage: "Claude Code daily usage",
-        claudeTopSessions: "Claude Code top sessions",
+        claudeDailyUsage: "Claude Code Daily Usage",
+        claudeTopSessions: "Claude Code Top Sessions",
         claudeTopSessionsSubtitle: "Largest deduplicated local session totals",
-        isambardStatus: "Isambard service status",
+        isambardStatus: "Isambard Service Status",
         isambardSubtitle: "Public service-status and planned-maintenance pages",
-        serviceStatus: "Current service status",
-        plannedMaintenance: "Planned maintenance",
-        fetchedAt: "Source fetched",
-        dataSource: "Data source",
-        liveFetch: "Live fetch",
-        cachedData: "Cached result",
-        cacheAge: "Cache age",
-        maintenanceWindows: "maintenance windows",
+        serviceStatus: "Current Service Status",
+        plannedMaintenance: "Planned Maintenance",
+        fetchedAt: "Source Fetched",
+        dataSource: "Data Source",
+        liveFetch: "Live Fetch",
+        cachedData: "Cached Result",
+        cacheAge: "Cache Age",
+        maintenanceWindows: "Maintenance Windows",
         viewMaintenance: "View full schedule →",
         operational: "Operational",
         degraded: "Warning",
@@ -2136,7 +2136,7 @@ MAINTENANCE_HTML = r"""<!doctype html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Planned maintenance · Codex Usage Dashboard</title>
+  <title>Planned Maintenance · Codex &amp; Claude Code Usage Dashboard</title>
   <style>
     :root {
       color-scheme: dark;
@@ -2266,17 +2266,17 @@ MAINTENANCE_HTML = r"""<!doctype html>
 </head>
 <body>
   <main class="shell">
-    <a class="back" href="/" data-i18n="back">← Back to dashboard</a>
+    <a class="back" href="/" data-i18n="back">← Back to Dashboard</a>
     <header>
       <div>
-        <h1 data-i18n="title">Planned maintenance</h1>
+        <h1 data-i18n="title">Planned Maintenance</h1>
         <p id="meta" class="meta"></p>
       </div>
-      <button id="refresh" type="button" data-i18n="refresh">Refresh source</button>
+      <button id="refresh" type="button" data-i18n="refresh">Refresh Source</button>
     </header>
     <div id="notice" class="notice"></div>
     <section>
-      <h2 data-i18n="schedule">Maintenance schedule</h2>
+      <h2 data-i18n="schedule">Maintenance Schedule</h2>
       <div id="content" class="panel-body"><div class="empty" data-i18n="loading">Loading…</div></div>
     </section>
   </main>
@@ -2289,16 +2289,16 @@ MAINTENANCE_HTML = r"""<!doctype html>
     const $ = (id) => document.getElementById(id);
     const TEXT = {
       en: {
-        back: "← Back to dashboard",
-        title: "Planned maintenance",
-        schedule: "Maintenance schedule",
-        refresh: "Refresh source",
+        back: "← Back to Dashboard",
+        title: "Planned Maintenance",
+        schedule: "Maintenance Schedule",
+        refresh: "Refresh Source",
         refreshing: "Refreshing…",
         loading: "Loading…",
         noRows: "No planned maintenance is currently listed.",
-        fetchedAt: "Source fetched",
-        liveFetch: "Live fetch",
-        cachedData: "Cached result",
+        fetchedAt: "Source Fetched",
+        liveFetch: "Live Fetch",
+        cachedData: "Cached Result",
         failed: "Could not load maintenance details."
       },
       zh: {
@@ -2331,7 +2331,7 @@ MAINTENANCE_HTML = r"""<!doctype html>
 
     function applyLanguage() {
       document.documentElement.lang = state.lang === "zh" ? "zh-CN" : "en";
-      document.title = `${t("title")} · Codex Usage Dashboard`;
+      document.title = `${t("title")} · Codex & Claude Code Usage Dashboard`;
       document.querySelectorAll("[data-i18n]").forEach((node) => {
         node.textContent = t(node.dataset.i18n);
       });

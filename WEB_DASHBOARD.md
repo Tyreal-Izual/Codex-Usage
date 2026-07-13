@@ -1,33 +1,33 @@
-# Codex Usage Local Web Dashboard
+# Codex & Claude Code Local Web Dashboard
 
 这个文档记录本仓库新增的本地网页仪表盘。原来的 `codex_usage.py`
 命令行工具保持不变；Claude Code 采集放在独立的 `claude_usage.py` 和
-`claude_usage_statusline.py` 中，网页版本 `codex_usage_web.py` 合并展示两类数据。
+`claude_usage_statusline.py` 中，网页版本 `codex_claude_usage_web.py` 合并展示两类数据。
 
 ## 这次新增了什么
 
-- 新增 `codex_usage_web.py`，启动一个本机可看的 HTTP 网页服务。
+- 新增 `codex_claude_usage_web.py`，启动一个本机可看的 HTTP 网页服务。
 - 默认只监听 `127.0.0.1`，避免把用量数据暴露到局域网。
 - 不需要额外安装第三方 Python 包，只使用标准库和原项目代码。
 - 页面会按设定间隔自动刷新，也可以手动点击刷新。
 - 新增深色背景界面。
 - 新增 English / 中文 Chinese 语言切换，并记住上次选择。
-- `Online rate limits` 放在页面最上方。
-- `Online rate limits` 显示 primary / weekly 还剩多少百分比，而不是已使用多少。
-- `Online rate limits` 始终保留 primary 和 weekly 两个窗口的位置。后端暂时
+- `Codex Online Rate Limits` 放在页面最上方。
+- `Codex Online Rate Limits` 显示 primary / weekly 还剩多少百分比，而不是已使用多少。
+- `Codex Online Rate Limits` 始终保留 primary 和 weekly 两个窗口的位置。后端暂时
   取消其中一个窗口时，该位置及对应的 reset 倒计时会显示 `-` 占位；另一个
   窗口仍显示实际数据。例如暂时没有 5h 限制但仍有 weekly 限制时，左侧
   primary 保留占位，右侧 weekly 显示 weekly 数据。
 - reset 倒计时使用天、小时、分钟格式，例如 `6 days 3 hr 12 min`
   或 `6 天 3 小时 12 分钟`。
 - 移除了顶部那组概览小方框，让页面更紧凑。
-- `Profile statistics` 和 `Daily local usage` 放在同一行，并保持卡片高度对齐。
-- `Daily local usage` 改成类似 GitHub contributions 的格子热力图。
-- 只保留 `Codex models`，移除了重复的
+- `Codex Profile Statistics` 和 `Codex Daily Local Usage` 放在同一行，并保持卡片高度对齐。
+- `Codex Daily Local Usage` 改成类似 GitHub contributions 的格子热力图。
+- 只保留 `Codex Models`，移除了重复的
   `Models in session metadata`。
-- `Codex models` 顶部使用堆叠条形图展示不同模型 token 占比。
-- `Codex models` 表格增加颜色标识和 `Share` 百分比列。
-- `Online rate limits` 详情区域改成 4 列，在小屏幕上会自动变成 2 列或 1 列。
+- `Codex Models` 顶部使用堆叠条形图展示不同模型 token 占比。
+- `Codex Models` 表格增加颜色标识和 `Share` 百分比列。
+- `Codex Online Rate Limits` 详情区域改成 4 列，在小屏幕上会自动变成 2 列或 1 列。
 - 新增 Isambard 服务状态报告，也会显示在总览中：当前服务状态紧凑显示；计划维护
   是状态区域内的可点击入口，会在独立的本地详情页展示。正常自动刷新会复用五分钟
   本地缓存，手动点击刷新会请求公开状态页面。抓取失败时会显示上次成功结果。
@@ -41,7 +41,7 @@
 在仓库目录里运行：
 
 ```sh
-python3 codex_usage_web.py
+python3 codex_claude_usage_web.py
 ```
 
 然后打开：
@@ -56,7 +56,7 @@ http://127.0.0.1:8765
 最简单的处理方式是换一个端口：
 
 ```sh
-python3 codex_usage_web.py --port 8766
+python3 codex_claude_usage_web.py --port 8766
 ```
 
 然后打开：
@@ -70,25 +70,25 @@ http://127.0.0.1:8766
 换端口：
 
 ```sh
-python3 codex_usage_web.py --port 8766
+python3 codex_claude_usage_web.py --port 8766
 ```
 
 调整浏览器默认刷新间隔，单位是秒：
 
 ```sh
-python3 codex_usage_web.py --refresh 30
+python3 codex_claude_usage_web.py --refresh 30
 ```
 
 隐藏每次请求的访问日志：
 
 ```sh
-python3 codex_usage_web.py --quiet
+python3 codex_claude_usage_web.py --quiet
 ```
 
 修改监听地址：
 
 ```sh
-python3 codex_usage_web.py --host 127.0.0.1
+python3 codex_claude_usage_web.py --host 127.0.0.1
 ```
 
 默认 host 是 `127.0.0.1`。如果改成 `0.0.0.0`，局域网内其他设备也可能访问到
@@ -102,15 +102,15 @@ python3 codex_usage_web.py --host 127.0.0.1
 | --- | --- |
 | `Report` | 选择总览、Codex 用量、Claude Code 用量，或 `Isambard 服务状态`；Codex 用量包含重置额度、本地/在线用量和可选的 Admin API 用量/成本 |
 | `Language` | 在 English 和 中文 Chinese 之间切换 |
-| `Top rows` | 控制排行榜或表格最多显示多少行 |
-| `Local days` | 控制本地每日用量热力图和每日数据窗口 |
-| `Refresh sec` | 控制自动刷新间隔 |
-| `Auto refresh` | 开启或关闭自动刷新 |
+| `Top Rows` | 控制排行榜或表格最多显示多少行 |
+| `Local Days` | 控制本地每日用量热力图和每日数据窗口 |
+| `Refresh Seconds` | 控制自动刷新间隔 |
+| `Auto Refresh` | 开启或关闭自动刷新 |
 | `Refresh` | 立即手动刷新一次 |
 
 ## Isambard 服务状态与计划维护
 
-总览的固定顺序是 `Online rate limits` 在第一位、`Isambard service status` 在第二位。
+总览的固定顺序是 `Codex Online Rate Limits` 在第一位、`Isambard Service Status` 在第二位。
 Isambard 面板顶部会显示抓取时间、数据来源、缓存时长（如适用）和可点击的 **计划维护**
 入口；入口会打开：
 
@@ -129,17 +129,17 @@ http://127.0.0.1:8765/isambard-maintenance
 
 | 区域 | 说明 |
 | --- | --- |
-| `Online rate limits` | 固定显示在线 primary / weekly 两个位置；可用窗口显示剩余百分比和 reset 时间，不可用窗口以 `-` 占位，同时显示账号状态 |
-| `Claude Code rate limits` | statusLine 快照中的 5 小时/7 天剩余百分比、重置时间、快照年龄和安装状态 |
-| `Claude Code local token totals` | 去重后的输入、输出、缓存创建、缓存读取和总 token |
-| `Claude Code models/projects/daily/top sessions` | Claude 本地 JSONL 的模型、项目、每日和 session 排行 |
-| `Isambard service status` | 公开 Isambard 服务状态、抓取时间与缓存状态；计划维护入口会打开二级详情页 |
-| `Reset credits` | 本地可读的 reset credits 信息 |
-| `Local token totals` | 从本地 session 文件统计出的 token 总量 |
-| `Codex models` | 从本地 thread 数据库按模型聚合，包含堆叠条形图、颜色标识和占比 |
-| `Profile statistics` | 在线 profile 统计信息 |
-| `Daily local usage` | 类似 GitHub contributions 的本地每日用量热力图 |
-| `Top sessions` | 本地 token 计数最高的 session 文件 |
+| `Codex Online Rate Limits` | 固定显示在线 primary / weekly 两个位置；可用窗口显示剩余百分比和 reset 时间，不可用窗口以 `-` 占位，同时显示账号状态 |
+| `Claude Code Rate Limits` | statusLine 快照中的 5 小时/7 天剩余百分比、重置时间、快照年龄和安装状态 |
+| `Claude Code Local Token Totals` | 去重后的输入、输出、缓存创建、缓存读取和总 token |
+| `Claude Code Models` / `Claude Code Projects` / `Claude Code Daily Usage` / `Claude Code Top Sessions` | Claude 本地 JSONL 的模型、项目、每日和 session 排行 |
+| `Isambard Service Status` | 公开 Isambard 服务状态、抓取时间与缓存状态；计划维护入口会打开二级详情页 |
+| `Codex Reset Credits` | 本地可读的 reset credits 信息 |
+| `Codex Local Token Totals` | 从本地 session 文件统计出的 token 总量 |
+| `Codex Models` | 从本地 thread 数据库按模型聚合，包含堆叠条形图、颜色标识和占比 |
+| `Codex Profile Statistics` | 在线 profile 统计信息 |
+| `Codex Daily Local Usage` | 类似 GitHub contributions 的本地每日用量热力图 |
+| `Codex Top Sessions` | 本地 token 计数最高的 session 文件 |
 | `Admin API status` | 设置 `OPENAI_ADMIN_KEY` 后展示 OpenAI Admin API 用量和成本 |
 
 如果某一类数据读取失败，页面会继续展示其他可用区域，并在顶部提示失败原因。
