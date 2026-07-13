@@ -2,18 +2,22 @@
   <a href="README.md">English</a> | <strong>中文</strong>
 </p>
 
-# Codex Usage
+# Codex 与 Claude Code Usage
 
 这是基于 [MacSteini/Codex-Usage](https://github.com/MacSteini/Codex-Usage)
 的 fork，在原有命令行工具基础上新增了一个本地网页仪表盘，用来查看本机
-Codex 用量信息，以及只读的 Codex/OpenAI 相关接口数据。
+Codex 与 Claude Code 用量信息，以及只读的 Codex/OpenAI 相关接口数据。
 
-现在有两种使用方式：
+项目提供一个仪表盘，以及面向 Codex 和 Claude Code 的独立采集器：
 
 - `codex_usage_web.py`：新增的本地深色网页仪表盘，支持自动刷新、中英文切换、
   rate-limit 进度条、每日用量热力图和模型用量图表。
 - `codex_usage.py`：上游原始命令行工具，也是 CLI 和网页仪表盘共同使用的核心
   采集与报告实现。
+- `claude_usage.py`：独立的 Claude Code 本地 token 采集器，不会把 Claude 逻辑
+  写进 `codex_usage.py`。
+- `claude_usage_statusline.py`：可选的 Claude Code statusLine 桥接脚本，用于保存
+  官方 5 小时和 7 天限额快照。
 
 不需要安装第三方 Python 包。项目只使用 Python 标准库。
 
@@ -44,6 +48,11 @@ Codex 用量信息，以及只读的 Codex/OpenAI 相关接口数据。
 - 类似 GitHub contributions 的每日本地用量热力图。
 - SQLite model counter 堆叠条形图，以及带颜色标识的模型表格。
 - 本地 token 总量和最高用量 session。
+- Claude Code 5 小时和 Weekly 剩余百分比及重置时间。
+- 去重后的 Claude Code 输入、输出、缓存创建和缓存读取 token，并按每日、模型、
+  项目和 session 展示。
+- 总览页只保留核心限额与模型摘要；详细的 Codex 与 Claude Code 用量面板可从各自的
+  模型卡片进入，避免首页过于拥挤。
 - 可选的 OpenAI Admin API 用量和成本视图，需要 `OPENAI_ADMIN_KEY`。
 - 总览和独立报告中的 Isambard 服务状态；计划维护采用紧凑的可点击入口并在独立本地
   详情页显示，带五分钟本地缓存和上次成功结果回退。
@@ -54,6 +63,7 @@ Codex 用量信息，以及只读的 Codex/OpenAI 相关接口数据。
 
 - Python 3.10 或更新版本。
 - 本机 Codex 状态目录，通常是 `~/.codex`。
+- Claude Code token 统计需要本机 `~/.claude/projects` 日志。
 - 如果要查看 reset credits 和在线 usage/profile，需要 Codex home 目录里的
   `auth.json` 登录信息。
 - 只有在查看可选的 OpenAI Admin API 用量/成本报告时，才需要 `OPENAI_ADMIN_KEY`。
@@ -104,20 +114,47 @@ python3 codex_usage_web.py --host 127.0.0.1 --port 8765
 
 仪表盘默认绑定到 `127.0.0.1`，所以它默认只用于本机查看。
 
+## Claude Code 限额采集设置
+
+只要本机存在 Claude Code JSONL，会话 token 统计就能直接显示。5 小时和 7 天订阅
+限额需要先安装一次随仓库提供的 statusLine 桥接脚本：
+
+```sh
+python3 claude_usage_statusline.py --install
+```
+
+然后让 Claude Code 完成一次回复。桥接脚本只会把经过筛选的限额快照写到
+`~/.claude/usage-dashboard.json`，不会复制 prompt 或回复内容。如果已经配置了其他
+statusLine，安装会停止而不会覆盖；只有确定要替换时才使用 `--force`。
+
+独立脚本也可以直接运行：
+
+```sh
+python3 claude_usage.py
+python3 claude_usage.py --json --days 30 --top 10
+python3 claude_usage_statusline.py --status
+python3 claude_usage_statusline.py --uninstall
+```
+
+Claude Code 使用非默认目录时设置 `CLAUDE_CONFIG_DIR`；只有需要自定义快照路径时才设置
+`CLAUDE_USAGE_SNAPSHOT`。
+
 ## Isambard 服务状态与计划维护
 
 在总览中，`Online rate limits` 固定显示在第一位，`Isambard service status`
 显示在第二位。也可以在 `Report` 选择框中选取 `Isambard 服务状态`，只查看这类数据。
 
-面板中的 **计划维护** 会打开本机二级页：
+Isambard 面板会显示当前服务状态卡片和源数据元信息。面板中的 **计划维护** 是一个可点击
+入口，完整维护计划会在本机二级页显示：
 
 ```text
 http://127.0.0.1:8765/isambard-maintenance
 ```
 
-普通自动刷新最多使用五分钟本地缓存。在总览或 `Isambard 服务状态` 报告中点击
-**刷新**，或在维护详情页点击 **刷新源数据**，会立即请求公开源页面；失败时会保留
-上次成功结果并给出提示。
+普通的自动刷新最多使用五分钟本地缓存，不会反复轮询 Isambard 公开网站。在总览或
+`Isambard 服务状态` 报告中点击 dashboard 的 **刷新**，或在维护详情页点击
+**刷新源数据**，会立即请求两个公开源页面。如果新请求失败，dashboard 会继续显示上次
+成功的结果，并给出提示。
 
 ## 原始 CLI
 
@@ -127,13 +164,16 @@ http://127.0.0.1:8765/isambard-maintenance
 
 ## 报告类型
 
+**总览**展示 Codex 与 Claude Code 的核心限额和模型摘要。在 **Codex models** 或
+**Claude Code models** 卡片下方点击链接，可进入相应详情视图。Codex 详情包含重置额度、
+Profile statistics、本地总量、每日用量、最高用量 session，以及可选的 Admin API 区域；
+Claude Code 详情包含本地总量、每日用量、项目和最高用量 session。
+
 | 报告 | Dashboard/API value | 网络请求 |
 | --- | --- | --- |
 | 总览 | `report=all` | 是 |
-| Reset credits | `report=resets` | 是 |
-| 本地用量 | `report=local-usage` | 否 |
-| 在线用量/profile | `report=online-usage` | 是 |
-| OpenAI API 用量/成本 | `report=api-usage` | 是，需要 `OPENAI_ADMIN_KEY` |
+| Codex 用量 | `report=codex-usage` | 是；包含重置额度、本地/在线用量，以及可选的 Admin API 用量/成本 |
+| Claude Code 用量 | `report=claude-usage` | 否 |
 | Isambard 服务状态 | `report=isambard-status` | 是，公开页面；本地缓存 |
 
 ## Dashboard API
@@ -150,14 +190,14 @@ GET /api/usage
 示例：
 
 ```text
-http://127.0.0.1:8765/api/usage?report=local-usage&top=10&days=30
+http://127.0.0.1:8765/api/usage?report=codex-usage&top=10&days=30
 ```
 
 常用 query 参数：
 
 | 参数 | 作用 | 默认值 |
 | --- | --- | --- |
-| `report` | `all`, `resets`, `local-usage`, `online-usage`, `api-usage`，或 `isambard-status` | `all` |
+| `report` | `all`, `codex-usage`, `claude-usage`，或 `isambard-status` | `all` |
 | `top` | 返回多少条排行数据 | `10` |
 | `days` | 最近多少天的本地每日窗口 | `30` |
 | `warn_days` | reset 即将过期提示窗口 | `7` |
@@ -171,12 +211,12 @@ http://127.0.0.1:8765/api/usage?report=local-usage&top=10&days=30
 
 <!-- markdownlint-disable MD033 -- HTML is used here so GitHub can render bounded thumbnails that link to the full-size screenshots. -->
 <p>
-  <a href="img/dashboard/1.png"><img src="img/dashboard/1.png" alt="Codex Usage 网页仪表盘截图 1" width="220"></a>
-  <a href="img/dashboard/2.png"><img src="img/dashboard/2.png" alt="Codex Usage 网页仪表盘截图 2" width="220"></a>
-  <a href="img/dashboard/3.png"><img src="img/dashboard/3.png" alt="Codex Usage 网页仪表盘截图 3" width="220"></a>
-  <a href="img/dashboard/4.png"><img src="img/dashboard/4.png" alt="Codex Usage 网页仪表盘截图 4" width="220"></a>
-  <a href="img/dashboard/5.png"><img src="img/dashboard/5.png" alt="Codex Usage 网页仪表盘截图 5" width="220"></a>
-  <a href="img/dashboard/6.png"><img src="img/dashboard/6.png" alt="Codex Usage 网页仪表盘截图 6" width="220"></a>
+  <a href="img/dashboard/1.png"><img src="img/dashboard/1.png" alt="Codex 与 Claude Code 限额总览" width="220"></a>
+  <a href="img/dashboard/2.png"><img src="img/dashboard/2.png" alt="服务状态与模型详情入口总览" width="220"></a>
+  <a href="img/dashboard/3.png"><img src="img/dashboard/3.png" alt="Codex 用量详细页" width="220"></a>
+  <a href="img/dashboard/4.png"><img src="img/dashboard/4.png" alt="Codex 本地每日用量和重置额度" width="220"></a>
+  <a href="img/dashboard/5.png"><img src="img/dashboard/5.png" alt="Claude Code 用量详细页" width="220"></a>
+  <a href="img/dashboard/6.png"><img src="img/dashboard/6.png" alt="中文版 Isambard 服务状态" width="220"></a>
 </p>
 <!-- markdownlint-enable MD033 -->
 
@@ -190,8 +230,11 @@ http://127.0.0.1:8765/api/usage?report=local-usage&top=10&days=30
 
 - 本地仪表盘默认只从 `127.0.0.1` 提供服务。
 - 本地用量从你机器上的 Codex 文件读取。
+- Claude Code token 从 `~/.claude/projects/**/*.jsonl` 读取；累计前会按请求和消息标识
+  去除重复的流式记录。
+- Claude 限额来自官方 statusLine 本地数据，仪表盘不会读取或复用 Claude OAuth 凭据。
 - Reset credits 和在线 usage/profile 报告使用只读的 Codex 后端请求。
-- 可选的 `api-usage` 报告使用 OpenAI Admin API 官方接口。
+- `codex-usage` 中可选的 Admin API 区域使用 OpenAI Admin API 官方接口。
 - Isambard 视图读取两个公开状态页面，并只在忽略的本地缓存
   `isambard_status_snapshot.json` 中保存解析后的结果。
 - 不要提交 `OPENAI_ADMIN_KEY`、Codex `auth.json`、私有导出报告，或包含敏感账户

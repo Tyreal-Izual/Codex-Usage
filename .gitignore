@@ -1,3 +1,4 @@
 __pycache__/
 *.pyc
 isambard_status_snapshot.json
+usage-dashboard.json
