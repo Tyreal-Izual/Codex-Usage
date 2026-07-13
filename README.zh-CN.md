@@ -2,83 +2,83 @@
   <a href="README.md">English</a> | <strong>中文</strong>
 </p>
 
-# Codex 与 Claude Code Usage
+# Codex 与 Claude Code 用量仪表盘
 
-这是基于 [MacSteini/Codex-Usage](https://github.com/MacSteini/Codex-Usage)
-的 fork，在原有命令行工具基础上新增了一个本地网页仪表盘，用来查看本机
-Codex 与 Claude Code 用量信息，以及只读的 Codex/OpenAI 相关接口数据。
+一个在本机运行、无需第三方依赖的综合仪表盘，用同一个网页查看 Codex、
+Claude Code 用量以及 Isambard 服务信息。
 
-项目提供一个仪表盘，以及面向 Codex 和 Claude Code 的独立采集器：
+仪表盘整合订阅限额窗口、本地 token 历史、模型和项目分布、每日热力图、session
+排行、可选的 OpenAI Admin API 数据，以及 Isambard 服务状态。程序只使用 Python
+标准库，默认仅监听 `127.0.0.1`。
 
-- `codex_claude_usage_web.py`：新增的本地深色网页仪表盘，支持自动刷新、中英文切换、
-  rate-limit 进度条、每日用量热力图和模型用量图表。
-- `codex_usage.py`：上游原始命令行工具，也是 CLI 和网页仪表盘共同使用的核心
-  采集与报告实现。
-- `claude_usage.py`：独立的 Claude Code 本地 token 采集器，不会把 Claude 逻辑
-  写进 `codex_usage.py`。
-- `claude_usage_statusline.py`：可选的 Claude Code statusLine 桥接脚本，用于保存
-  官方 5 小时和 7 天限额快照。
+> 本仓库现在作为**独立项目**维护，不再将自己定位为与上游同步的传统 fork。
+> 其中，**Codex 用量采集与报告基础派生自
+> [MacSteini/Codex-Usage](https://github.com/MacSteini/Codex-Usage)**；综合网页仪表盘、
+> Claude Code 支持、statusLine 桥接、Isambard 集成、中英文界面及相关文档，均为
+> 本项目后续实现的功能。
 
-不需要安装第三方 Python 包。项目只使用 Python 标准库。
+本项目不是 OpenAI、Anthropic、Codex、Claude Code 或 Isambard 的官方工具。
 
-> 这不是 OpenAI 或 Codex 的官方工具。它不会兑换额度、购买额度、修改你的账户、
-> 修改 Codex 设置，也不会上传本地 transcript。
+## 页面截图
 
-## 来源与署名
+<!-- markdownlint-disable MD033 -- 使用 HTML 让 GitHub 截图画廊保持紧凑。 -->
+<p>
+  <a href="img/dashboard/1.png"><img src="img/dashboard/1.png" alt="Codex 与 Claude Code 限额总览" width="220"></a>
+  <a href="img/dashboard/2.png"><img src="img/dashboard/2.png" alt="Isambard 状态与模型摘要" width="220"></a>
+  <a href="img/dashboard/3.png"><img src="img/dashboard/3.png" alt="Codex 用量详情" width="220"></a>
+  <a href="img/dashboard/4.png"><img src="img/dashboard/4.png" alt="Codex 每日用量与重置额度" width="220"></a>
+  <a href="img/dashboard/5.png"><img src="img/dashboard/5.png" alt="Claude Code 用量详情" width="220"></a>
+  <a href="img/dashboard/6.png"><img src="img/dashboard/6.png" alt="中文版 Isambard 服务状态" width="220"></a>
+</p>
+<!-- markdownlint-enable MD033 -->
 
-本仓库基于
-[MacSteini/Codex-Usage](https://github.com/MacSteini/Codex-Usage)。核心实现是上游
-`codex_usage.py` CLI，它负责采集并渲染 Codex 用量报告。原始 CLI 版本的项目说明
-和完整使用指南保留在 [旧 README](README_OLD.md) 中。
+## 项目来源与署名
 
-这个 fork 的主要改动是在 `codex_claude_usage_web.py` 中新增一个本地、可自动刷新的浏览器
-仪表盘，并补充相关文档。原 CLI 仍然可用，并且仍然是网页仪表盘数据的基础。
+当前代码的来源边界如下：
 
-上游项目使用 MIT License 分发。复制、修改或再分发本项目时，请保留 `LICENCE`
-中的版权声明和许可条款。
+| 部分 | 来源 |
+| --- | --- |
+| `codex_usage.py` 及 Codex 采集、计算和报告基础 | 派生自 [MacSteini/Codex-Usage](https://github.com/MacSteini/Codex-Usage)；该文件有意与新增功能分离，目前仍保持导入上游版本的内容不变 |
+| 网页中显示的 Codex 数据结果 | 由上游派生的 `codex_usage.py` 提供数据，再集成进本项目网页 |
+| `codex_claude_usage_web.py` 与综合网页界面 | 本项目实现 |
+| `claude_usage.py` 与 `claude_usage_statusline.py` | 本项目独立实现，不向 `codex_usage.py` 写入 Claude 逻辑 |
+| `isambard_status.py`、中英文界面、页面布局与整合逻辑 | 本项目实现 |
 
-## 功能
+上游项目采用 MIT License。原作者的版权和许可声明保留在
+[LICENCE](LICENCE) 中；上游 CLI 的原始说明保留在
+[README_OLD.md](README_OLD.md) 中。
 
-- 本地网页仪表盘：`http://127.0.0.1:8765`。
-- 自动刷新用量视图，也可以手动刷新。
-- English / 中文 Chinese 界面切换。
-- Online rate-limit 视图固定保留 primary 和 weekly 两个位置；可用窗口显示
-  剩余百分比，暂时不可用的窗口显示 `-` 占位。
-- reset 倒计时以天、小时、分钟显示。
-- 类似 GitHub contributions 的每日本地用量热力图。
-- SQLite model counter 堆叠条形图，以及带颜色标识的模型表格。
-- 本地 token 总量和最高用量 session。
-- Claude Code 5 小时和 Weekly 剩余百分比及重置时间。
-- 去重后的 Claude Code 输入、输出、缓存创建和缓存读取 token，并按每日、模型、
-  项目和 session 展示。
-- 总览页只保留核心限额与模型摘要；详细的 Codex 与 Claude Code 用量面板可从各自的
-  模型卡片进入，避免首页过于拥挤。
-- 可选的 OpenAI Admin API 用量和成本视图，需要 `OPENAI_ADMIN_KEY`。
-- 总览和独立报告中的 Isambard 服务状态；计划维护采用紧凑的可点击入口并在独立本地
-  详情页显示，带五分钟本地缓存和上次成功结果回退。
-- 原始 CLI 报告和导出功能仍然保留；完整 CLI 指南见
-  [README_OLD.md](README_OLD.md)。
+## 功能概览
+
+- Codex 限额、Claude Code 限额、Isambard 状态，以及 Codex/Claude 模型摘要的
+  本地综合总览。
+- 独立的 Codex 与 Claude Code 详情页面。
+- 中英文界面，并在本地记住语言选择。
+- 自动刷新和手动刷新。
+- Primary/5 小时和 Weekly/7 天限额条及 reset 倒计时。
+- 本地 token 总量、模型占比、每日热力图和最高用量 session。
+- Claude Code input、output、cache creation 和 cache read token 统计，并按
+  request/message 标识去重。
+- Claude Code 模型、项目、session、每日和 subagent JSONL 统计。
+- 通过 `OPENAI_ADMIN_KEY` 可选显示 OpenAI 组织用量与成本。
+- Isambard 当前服务状态和计划维护，带五分钟缓存及上次成功结果回退。
+- 供其他工具读取的本地 JSON API。
+- 保留原 Codex CLI 报告和 TXT/JSON/CSV 导出功能。
 
 ## 运行要求
 
 - Python 3.10 或更新版本。
-- 本机 Codex 状态目录，通常是 `~/.codex`。
-- Claude Code token 统计需要本机 `~/.claude/projects` 日志。
-- 如果要查看 reset credits 和在线 usage/profile，需要 Codex home 目录里的
-  `auth.json` 登录信息。
-- 只有在查看可选的 OpenAI Admin API 用量/成本报告时，才需要 `OPENAI_ADMIN_KEY`。
+- 本机 Codex 状态目录，通常为 `~/.codex`。
+- Claude token 历史需要 `~/.claude/projects` 下的本地 Claude Code transcript。
+- Codex reset credits 和只读在线 usage/profile 数据需要
+  `~/.codex/auth.json` 中的 Codex 登录状态。
+- 只有可选的 OpenAI Admin API 区域需要 `OPENAI_ADMIN_KEY`。
 
-默认情况下，工具从这里读取 Codex 数据：
+无需安装 Python 包或第三方依赖。
 
-```text
-Path.home() / ".codex"
-```
+## 快速开始
 
-如果你的 Codex 数据在其他位置，可以设置 `CODEX_HOME`。
-
-## 快速开始：网页仪表盘
-
-在仓库目录中运行：
+在仓库目录运行：
 
 ```sh
 python3 codex_claude_usage_web.py
@@ -90,44 +90,50 @@ python3 codex_claude_usage_web.py
 http://127.0.0.1:8765
 ```
 
-在终端中按 `Ctrl-C` 可以停止服务。
-
-如果端口 `8765` 已经被占用，可以换一个端口：
+在终端按 `Ctrl-C` 停止服务。常用参数：
 
 ```sh
 python3 codex_claude_usage_web.py --port 8766
-```
-
-然后打开：
-
-```text
-http://127.0.0.1:8766
-```
-
-常用选项：
-
-```sh
 python3 codex_claude_usage_web.py --refresh 30
 python3 codex_claude_usage_web.py --quiet
 python3 codex_claude_usage_web.py --host 127.0.0.1 --port 8765
 ```
 
-仪表盘默认绑定到 `127.0.0.1`，所以它默认只用于本机查看。
+默认监听地址有意限制为本机。改成 `0.0.0.0` 后，局域网内其他设备可能访问到账户
+和用量信息，请谨慎使用。
 
-## Claude Code 限额采集设置
+## Claude Code 设置
 
-只要本机存在 Claude Code JSONL，会话 token 统计就能直接显示。5 小时和 7 天订阅
-限额需要先安装一次随仓库提供的 statusLine 桥接脚本：
+### 本地 token 历史
+
+本地 token 统计无需执行安装命令。`claude_usage.py` 会读取：
+
+```text
+~/.claude/projects/**/*.jsonl
+```
+
+程序忽略 prompt、回复正文、工具输入和文件内容。只要 Claude Desktop 的 Code
+会话写入同一目录，也会被纳入统计。
+
+### 官方 5 小时和 7 天窗口
+
+要保存 Claude Code 提供给 statusLine 脚本的官方订阅限额，需要注册一次随项目提供的
+桥接脚本：
 
 ```sh
 python3 claude_usage_statusline.py --install
 ```
 
-然后让 Claude Code 完成一次回复。桥接脚本只会把经过筛选的限额快照写到
-`~/.claude/usage-dashboard.json`，不会复制 prompt 或回复内容。如果已经配置了其他
-statusLine，安装会停止而不会覆盖；只有确定要替换时才使用 `--force`。
+兼容的 Claude Code 客户端完成一次回复后，桥接脚本会将经过筛选的快照写入：
 
-独立脚本也可以直接运行：
+```text
+~/.claude/usage-dashboard.json
+```
+
+快照只包含限额百分比、reset 时间、模型元数据和采集元数据，不保存 prompt 或回复。
+如果已经存在其他 statusLine，安装不会覆盖；只有明确需要替换时才使用 `--force`。
+
+常用独立命令：
 
 ```sh
 python3 claude_usage.py
@@ -136,49 +142,32 @@ python3 claude_usage_statusline.py --status
 python3 claude_usage_statusline.py --uninstall
 ```
 
-Claude Code 使用非默认目录时设置 `CLAUDE_CONFIG_DIR`；只有需要自定义快照路径时才设置
-`CLAUDE_USAGE_SNAPSHOT`。
+> 网页自动刷新只能重新读取已有快照，不能要求 Anthropic 更新快照。Claude Desktop
+> 可能会持续写入本地 JSONL，却不调用自定义 statusLine。此时 token 图表会继续更新，
+> 但 5 小时/7 天限额快照会逐渐过期。页面会显示 snapshot age 和 stale 状态，避免把
+> 旧数据误认为账户实时用量。
 
-## Isambard 服务状态与计划维护
+## 页面与数据来源
 
-在总览中，`Codex Online Rate Limits` 固定显示在第一位，`Isambard Service Status`
-显示在第二位。也可以在 `Report` 选择框中选取 `Isambard 服务状态`，只查看这类数据。
+| 页面 | 主要内容 | 网络请求 |
+| --- | --- | --- |
+| 总览（`all`） | Codex 限额、Claude Code 限额、Isambard 状态和模型摘要 | Codex 只读接口与 Isambard 公开页面；其他为本地数据 |
+| Codex 用量（`codex-usage`） | Reset credits、本地 token/模型/每日/session、在线 profile，以及可选 Admin API 数据 | 是 |
+| Claude Code 用量（`claude-usage`） | 本地 token、模型、项目、每日、session 和保存的 statusLine 快照 | 否 |
+| Isambard 服务状态（`isambard-status`） | 当前服务卡片和计划维护 | 公开页面，本地缓存 |
 
-Isambard 面板会显示当前服务状态卡片和源数据元信息。面板中的 **计划维护** 是一个可点击
-入口，完整维护计划会在本机二级页显示：
+完整计划维护页面：
 
 ```text
 http://127.0.0.1:8765/isambard-maintenance
 ```
 
-普通的自动刷新最多使用五分钟本地缓存，不会反复轮询 Isambard 公开网站。在总览或
-`Isambard 服务状态` 报告中点击 dashboard 的 **刷新**，或在维护详情页点击
-**刷新源数据**，会立即请求两个公开源页面。如果新请求失败，dashboard 会继续显示上次
-成功的结果，并给出提示。
+普通自动刷新最多复用五分钟 Isambard 缓存；手动刷新会跳过缓存。如果在线请求失败，
+页面会保留最近一次成功结果并显示警告。
 
-## 原始 CLI
+## 本地 JSON API
 
-原始命令行工具仍然保留为 `codex_usage.py`，并且仍然是网页仪表盘使用的核心
-采集/报告实现。CLI 安装、命令、导出、认证说明和故障排查，请看保留的
-[旧 README](README_OLD.md)。
-
-## 报告类型
-
-**总览**展示 Codex 与 Claude Code 的核心限额和模型摘要。在 **Codex Models** 或
-**Claude Code Models** 卡片下方点击链接，可进入相应详情视图。Codex 详情包含重置额度、
-Codex Profile Statistics、本地总量、每日用量、最高用量 session，以及可选的 Admin API 区域；
-Claude Code 详情包含本地总量、每日用量、项目和最高用量 session。
-
-| 报告 | Dashboard/API value | 网络请求 |
-| --- | --- | --- |
-| 总览 | `report=all` | 是 |
-| Codex 用量 | `report=codex-usage` | 是；包含重置额度、本地/在线用量，以及可选的 Admin API 用量/成本 |
-| Claude Code 用量 | `report=claude-usage` | 否 |
-| Isambard 服务状态 | `report=isambard-status` | 是，公开页面；本地缓存 |
-
-## Dashboard API
-
-网页服务也提供本地 JSON 接口：
+网页服务提供：
 
 ```text
 GET /
@@ -193,52 +182,64 @@ GET /api/usage
 http://127.0.0.1:8765/api/usage?report=codex-usage&top=10&days=30
 ```
 
-常用 query 参数：
-
 | 参数 | 作用 | 默认值 |
 | --- | --- | --- |
-| `report` | `all`, `codex-usage`, `claude-usage`，或 `isambard-status` | `all` |
-| `top` | 返回多少条排行数据 | `10` |
+| `report` | `all`、`codex-usage`、`claude-usage` 或 `isambard-status` | `all` |
+| `top` | 排行数据最多返回多少行 | `10` |
 | `days` | 最近多少天的本地每日窗口 | `30` |
-| `warn_days` | reset 即将过期提示窗口 | `7` |
-| `bucket_width` | API usage 桶宽：`1d`, `1h`, 或 `1m` | `1d` |
-| `limit` | 可选的 API usage bucket 数量限制 | 空 |
-| `group_by` | 可选 API usage 分组字段，可重复或用逗号分隔 | 空 |
-| `no_costs` | 用 `1`, `true`, 或 `yes` 跳过 API costs 查询 | `false` |
-| `isambard_force_refresh` | 用 `1`, `true`, 或 `yes` 跳过 Isambard 缓存 | `false` |
+| `warn_days` | Reset credit 即将过期的提示窗口 | `7` |
+| `bucket_width` | Admin API 桶宽：`1d`、`1h` 或 `1m` | `1d` |
+| `limit` | 可选的 Admin API bucket 数量限制 | 空 |
+| `group_by` | 可选的 Admin API 分组字段，可重复或用逗号分隔 | 空 |
+| `no_costs` | 使用 `1`、`true` 或 `yes` 跳过 Admin API cost 请求 | `false` |
+| `isambard_force_refresh` | 使用 `1`、`true` 或 `yes` 跳过 Isambard 缓存 | `false` |
 
-## 截图
+## 独立采集器与原 Codex CLI
 
-<!-- markdownlint-disable MD033 -- HTML is used here so GitHub can render bounded thumbnails that link to the full-size screenshots. -->
-<p>
-  <a href="img/dashboard/1.png"><img src="img/dashboard/1.png" alt="Codex 与 Claude Code 限额总览" width="220"></a>
-  <a href="img/dashboard/2.png"><img src="img/dashboard/2.png" alt="服务状态与模型详情入口总览" width="220"></a>
-  <a href="img/dashboard/3.png"><img src="img/dashboard/3.png" alt="Codex 用量详细页" width="220"></a>
-  <a href="img/dashboard/4.png"><img src="img/dashboard/4.png" alt="Codex 本地每日用量和重置额度" width="220"></a>
-  <a href="img/dashboard/5.png"><img src="img/dashboard/5.png" alt="Claude Code 用量详细页" width="220"></a>
-  <a href="img/dashboard/6.png"><img src="img/dashboard/6.png" alt="中文版 Isambard 服务状态" width="220"></a>
-</p>
-<!-- markdownlint-enable MD033 -->
+不启动网页也可以单独运行采集器：
+
+```sh
+python3 claude_usage.py
+python3 codex_usage.py
+python3 codex_usage.py local-usage --top 20 --days 60
+python3 codex_usage.py export --report all --format json
+```
+
+在交互式终端直接运行 `codex_usage.py` 会打开菜单。完整命令、导出和故障排查说明见
+[README_OLD.md](README_OLD.md)。
+
+## 配置项
+
+| 环境变量 | 作用 |
+| --- | --- |
+| `CODEX_HOME` | 使用 `~/.codex` 以外的 Codex 数据目录 |
+| `CLAUDE_CONFIG_DIR` | 使用 `~/.claude` 以外的 Claude Code 数据目录 |
+| `CLAUDE_USAGE_SNAPSHOT` | 从其他位置保存/读取 Claude 限额快照 |
+| `CLAUDE_USAGE_STALE_SECONDS` | 修改 Claude 快照默认 15 分钟的过期判断阈值 |
+| `OPENAI_ADMIN_KEY` | 启用可选的 OpenAI 组织用量与成本请求 |
+
+## 隐私与限制
+
+- 服务默认只监听 `127.0.0.1`。
+- 只读取本地 Codex 和 Claude 文件，不修改这些文件。
+- Claude 流式重复记录会在累计 token 前去重。
+- Claude statusLine 桥接不会读取或复用 Claude OAuth 凭据。
+- Codex reset-credit 和在线 profile 请求均为只读。
+- OpenAI Admin API 是可选功能，并使用公开文档接口。
+- Isambard 数据来自公开状态页，本地只保存解析后的缓存。
+- 各采集器独立处理错误，单个来源不可用不会使整个网页停止工作。
+
+上游派生的 Codex 采集器使用了部分未公开的 Codex 订阅接口，这些接口未来可能变化。
+所有数值都应视为运行状态参考，而不是正式账单。请勿提交 API key、`auth.json`、私有
+导出文件、账户缓存或包含敏感信息的截图。
 
 ## 文档
 
-- [README.md](README.md)：英文版 README，也是 GitHub 默认显示的首页。
-- [WEB_DASHBOARD.md](WEB_DASHBOARD.md)：本地网页仪表盘的详细说明。
-- [README_OLD.md](README_OLD.md)：原 CLI 版本的长文档。
+- [README.md](README.md)：英文版，也是 GitHub 默认显示的首页。
+- [WEB_DASHBOARD.md](WEB_DASHBOARD.md)：仪表盘行为和数据来源的详细说明。
+- [README_OLD.md](README_OLD.md)：上游派生 Codex CLI 的保留文档。
 
-## 隐私与安全
+## 许可证
 
-- 本地仪表盘默认只从 `127.0.0.1` 提供服务。
-- 本地用量从你机器上的 Codex 文件读取。
-- Claude Code token 从 `~/.claude/projects/**/*.jsonl` 读取；累计前会按请求和消息标识
-  去除重复的流式记录。
-- Claude 限额来自官方 statusLine 本地数据，仪表盘不会读取或复用 Claude OAuth 凭据。
-- Reset credits 和在线 usage/profile 报告使用只读的 Codex 后端请求。
-- `codex-usage` 中可选的 Admin API 区域使用 OpenAI Admin API 官方接口。
-- Isambard 视图读取两个公开状态页面，并只在忽略的本地缓存
-  `isambard_status_snapshot.json` 中保存解析后的结果。
-- 不要提交 `OPENAI_ADMIN_KEY`、Codex `auth.json`、私有导出报告，或包含敏感账户
-  信息的截图。
-
-在线报告使用的 Codex 后端接口未公开文档，未来可能变化。请把输出当作有用的
-运行状态信息，而不是正式账单。
+本项目使用 MIT License，详见 [LICENCE](LICENCE)。上游派生的 Codex 实现保留了
+MacSteini 的原始版权声明。

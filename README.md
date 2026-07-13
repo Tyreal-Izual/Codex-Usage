@@ -2,144 +2,150 @@
   <strong>English</strong> | <a href="README.zh-CN.md">中文</a>
 </p>
 
-# Codex & Claude Code Usage
+# Codex & Claude Code Usage Dashboard
 
-A fork of [MacSteini/Codex-Usage](https://github.com/MacSteini/Codex-Usage)
-with an added local web dashboard for reading Codex and Claude Code usage from
-one page.
+A local, dependency-free dashboard for viewing Codex, Claude Code, and
+Isambard service information in one browser page.
 
-It includes a dashboard plus focused Codex and Claude Code collectors:
+The dashboard combines subscription rate-limit windows, local token history,
+model and project breakdowns, daily heatmaps, session rankings, optional
+OpenAI Admin API data, and Isambard service status. It runs with the Python
+standard library and binds to `127.0.0.1` by default.
 
-- `codex_claude_usage_web.py`: the added local dark-mode web dashboard with auto-refresh,
-  English/Chinese language switching, rate-limit bars, daily heatmap, and model
-  usage charts.
-- `codex_usage.py`: the original upstream command-line tool and the core
-  collector/reporting implementation used by both the CLI and the web dashboard.
-- `claude_usage.py`: an independent, local-only Claude Code token collector. It
-  does not add Claude-specific logic to `codex_usage.py`.
-- `claude_usage_statusline.py`: an optional Claude Code statusLine bridge that
-  captures the documented 5-hour and 7-day rate-limit snapshot.
+> This repository is maintained as an independent project, not as a
+> synchronised mirror of its upstream. Its **Codex collection and reporting
+> foundation is derived from
+> [MacSteini/Codex-Usage](https://github.com/MacSteini/Codex-Usage)**. The
+> combined web dashboard, Claude Code support, statusLine bridge, Isambard
+> integration, bilingual interface, and related documentation are additions
+> developed in this project.
 
-No package install is required. The project uses Python standard-library modules
-only.
+This is not an official OpenAI, Anthropic, Codex, Claude Code, or Isambard
+tool.
 
-> This is not an official OpenAI or Codex tool. It does not redeem credits, buy
-> credits, change your account, change Codex settings, or upload local
-> transcripts.
+## Screenshots
 
-## Source And Attribution
+<!-- markdownlint-disable MD033 -- HTML keeps the screenshot gallery compact on GitHub. -->
+<p>
+  <a href="img/dashboard/1.png"><img src="img/dashboard/1.png" alt="Codex and Claude Code rate-limit overview" width="220"></a>
+  <a href="img/dashboard/2.png"><img src="img/dashboard/2.png" alt="Isambard status and model summaries" width="220"></a>
+  <a href="img/dashboard/3.png"><img src="img/dashboard/3.png" alt="Codex usage details" width="220"></a>
+  <a href="img/dashboard/4.png"><img src="img/dashboard/4.png" alt="Codex daily usage and reset credits" width="220"></a>
+  <a href="img/dashboard/5.png"><img src="img/dashboard/5.png" alt="Claude Code usage details" width="220"></a>
+  <a href="img/dashboard/6.png"><img src="img/dashboard/6.png" alt="Isambard service status in Chinese" width="220"></a>
+</p>
+<!-- markdownlint-enable MD033 -->
 
-This repository is based on
-[MacSteini/Codex-Usage](https://github.com/MacSteini/Codex-Usage). The core
-implementation is the upstream `codex_usage.py` CLI, which collects and renders
-the Codex usage reports. For the original CLI-focused project description and
-usage guide, see the preserved [old README](README_OLD.md).
+## Project Origin and Attribution
 
-The changes in this fork mainly add a local, auto-refreshing browser dashboard
-in `codex_claude_usage_web.py`, plus supporting documentation. The original CLI remains
-available and is still the foundation for the dashboard data.
+The codebase has two clearly separated origins:
 
-The upstream project is distributed under the MIT License. Keep the copyright
-notice and license terms from `LICENCE` when copying, modifying, or
-redistributing this project.
+| Area | Origin |
+| --- | --- |
+| `codex_usage.py` and the Codex collection/reporting foundation | Derived from [MacSteini/Codex-Usage](https://github.com/MacSteini/Codex-Usage); the file is intentionally kept separate and currently remains unchanged from the imported upstream version |
+| Codex results displayed in the browser | Powered by the upstream-derived `codex_usage.py` collector and integrated into this project's web interface |
+| `codex_claude_usage_web.py` and the combined browser UI | Developed in this project |
+| `claude_usage.py` and `claude_usage_statusline.py` | Developed in this project; independent of `codex_usage.py` |
+| `isambard_status.py`, bilingual UI, dashboard layout, and integration logic | Developed in this project |
+
+The upstream project is distributed under the MIT License. Its copyright and
+license notice remain in [LICENCE](LICENCE). The upstream CLI documentation is
+preserved in [README_OLD.md](README_OLD.md).
 
 ## Features
 
-- Local browser dashboard at `http://127.0.0.1:8765`.
-- Auto-refreshing usage view with a manual refresh button.
-- English / 中文 Chinese interface switch.
-- Online rate-limit view with fixed primary and weekly positions, showing the
-  percentage left for each available window and `-` for a temporarily
-  unavailable one.
-- Reset countdowns shown as days, hours, and minutes.
-- GitHub-contributions-style daily local usage heatmap.
-- SQLite model counter chart with stacked token share and per-model table.
-- Local token totals and top local sessions.
-- Claude Code 5-hour and weekly remaining percentages and reset times.
-- Deduplicated Claude Code input, output, cache-creation, and cache-read tokens,
-  with daily, model, project, and session breakdowns.
-- Overview-focused layout: detailed Codex and Claude Code usage panels open from
-  their respective model cards instead of crowding the first page.
-- Optional OpenAI Admin API usage and costs through `OPENAI_ADMIN_KEY`.
-- Isambard service status in the overview or a dedicated view, with a compact
-  planned-maintenance link to its own local detail page, a five-minute cache,
+- Combined local overview for Codex rate limits, Claude Code rate limits,
+  Isambard status, and Codex/Claude model summaries.
+- Dedicated Codex and Claude Code detail views.
+- English and Chinese interface with the language choice retained locally.
+- Automatic refresh and manual refresh controls.
+- Primary/5-hour and weekly/7-day limit bars with reset countdowns.
+- Local token totals, model shares, daily heatmaps, and top sessions.
+- Claude Code input, output, cache-creation, and cache-read token accounting,
+  deduplicated by request/message identity.
+- Claude Code model, project, session, and daily breakdowns, including subagent
+  JSONL files.
+- Optional OpenAI organisation usage and cost data through
+  `OPENAI_ADMIN_KEY`.
+- Isambard service status and planned maintenance, with a five-minute cache
   and last-known-good fallback.
-- Original CLI reports and exports remain available; see
-  [README_OLD.md](README_OLD.md) for the full CLI guide.
+- Local JSON API for integrations and automation.
+- Original Codex command-line reports and TXT/JSON/CSV exports.
 
 ## Requirements
 
 - Python 3.10 or newer.
-- Local Codex state in your Codex home directory, usually `~/.codex`.
-- Local Claude Code transcripts in `~/.claude/projects` for Claude token usage.
-- A Codex login in `auth.json` for reset credits and online usage/profile
-  reports.
-- `OPENAI_ADMIN_KEY` only if you want the optional OpenAI Admin API usage/cost
-  report.
+- Local Codex state, normally under `~/.codex`.
+- Local Claude Code transcripts under `~/.claude/projects` for Claude token
+  history.
+- A Codex login in `~/.codex/auth.json` for Codex reset credits and read-only
+  online usage/profile data.
+- `OPENAI_ADMIN_KEY` only for the optional OpenAI Admin API section.
 
-By default, the tool reads Codex data from:
+No package installation or third-party Python dependency is required.
 
-```text
-Path.home() / ".codex"
-```
+## Quick Start
 
-Set `CODEX_HOME` if your Codex data lives somewhere else.
-
-## Quick Start: Web Dashboard
-
-Run this from the repository directory:
+From the repository directory, run:
 
 ```sh
 python3 codex_claude_usage_web.py
 ```
 
-Open:
+Then open:
 
 ```text
 http://127.0.0.1:8765
 ```
 
-Stop the server with `Ctrl-C` in the terminal.
-
-If port `8765` is already in use, choose another port:
+Stop the server with `Ctrl-C`. Common options are:
 
 ```sh
 python3 codex_claude_usage_web.py --port 8766
-```
-
-Then open:
-
-```text
-http://127.0.0.1:8766
-```
-
-Useful dashboard options:
-
-```sh
 python3 codex_claude_usage_web.py --refresh 30
 python3 codex_claude_usage_web.py --quiet
 python3 codex_claude_usage_web.py --host 127.0.0.1 --port 8765
 ```
 
-The dashboard binds to `127.0.0.1` by default, so it is intended for local use
-on your own machine.
+The default host is deliberately local-only. Changing it to `0.0.0.0` may
+expose account and usage information to other devices on the network.
 
-## Claude Code Rate-Limit Setup
+## Claude Code Setup
 
-Claude token history works immediately when local Claude Code JSONL files are
-present. To display the official 5-hour and 7-day subscription windows, install
-the included statusLine bridge once:
+### Local token history
+
+No installation step is required for token history. `claude_usage.py` reads
+usage metadata from:
+
+```text
+~/.claude/projects/**/*.jsonl
+```
+
+Prompt text, response text, tool inputs, and file contents are ignored. Claude
+Desktop Code sessions are included when the app writes them to this same
+directory.
+
+### Official 5-hour and 7-day windows
+
+To capture the official subscription windows exposed to Claude Code
+statusLine scripts, register the included bridge once:
 
 ```sh
 python3 claude_usage_statusline.py --install
 ```
 
-Then let Claude Code complete one response. The bridge writes only a sanitised
-rate-limit snapshot to `~/.claude/usage-dashboard.json`; it does not copy prompt
-or response content. If another statusLine is already configured, installation
-stops instead of replacing it. Use `--force` only when replacement is intended.
+After a compatible Claude Code client completes a response, the bridge writes
+a sanitised snapshot to:
 
-Useful standalone commands:
+```text
+~/.claude/usage-dashboard.json
+```
+
+It stores only rate-limit percentages, reset timestamps, model metadata, and
+capture metadata. It does not store prompts or responses. Installation refuses
+to replace a different statusLine unless `--force` is explicitly supplied.
+
+Useful commands:
 
 ```sh
 python3 claude_usage.py
@@ -148,55 +154,35 @@ python3 claude_usage_statusline.py --status
 python3 claude_usage_statusline.py --uninstall
 ```
 
-Set `CLAUDE_CONFIG_DIR` when Claude Code uses a non-default data directory. Set
-`CLAUDE_USAGE_SNAPSHOT` only when the snapshot should live at a custom path.
+> Browser auto-refresh only rereads the latest snapshot; it cannot make
+> Anthropic refresh that snapshot. Claude Desktop may update local JSONL token
+> history without invoking a custom statusLine. In that case, token charts
+> continue to change while the 5-hour/7-day snapshot becomes stale. The
+> dashboard displays snapshot age and stale state so an old value is not
+> mistaken for live account usage.
 
-## Isambard Status and Planned Maintenance
+## Dashboard Views and Data Sources
 
-In the overview, `Codex Online Rate Limits` is the first panel and `Isambard Service
-Status` is the second. You can also choose **Isambard Service Status** from the
-Report selector to focus on that data alone.
+| View | Main contents | Network |
+| --- | --- | --- |
+| Overview (`all`) | Codex rate limits, Claude Code rate limits, Isambard status, and model summaries | Codex read-only endpoints and public Isambard pages; local data otherwise |
+| Codex Usage (`codex-usage`) | Reset credits, local tokens/models/days/sessions, online profile data, and optional Admin API data | Yes |
+| Claude Code Usage (`claude-usage`) | Local token totals, models, projects, days, sessions, and the saved statusLine snapshot | No |
+| Isambard Service Status (`isambard-status`) | Current service cards and planned maintenance | Public pages, cached locally |
 
-The Isambard panel shows the current service cards plus source metadata. Its
-**Planned Maintenance** item is a link to the full local schedule page:
+The full planned-maintenance view is available at:
 
 ```text
 http://127.0.0.1:8765/isambard-maintenance
 ```
 
-The normal dashboard refresh uses a local cache for up to five minutes, so it
-does not repeatedly poll the public Isambard site. While viewing the overview
-or Isambard report, use the dashboard's manual **Refresh** button or the
-maintenance page's **Refresh Source** button to fetch the two public source
-pages immediately. If a fresh request fails, the dashboard
-keeps displaying the last successful result and shows a warning.
+Automatic dashboard refreshes reuse Isambard data for up to five minutes.
+Manual refresh bypasses that cache. If a live request fails, the most recent
+successful result remains visible with a warning.
 
-## Original CLI
+## Local JSON API
 
-The original command-line interface remains available as `codex_usage.py` and
-is still the core collector/reporting implementation used by the dashboard.
-For CLI setup, commands, exports, authentication notes, and troubleshooting,
-see the preserved [old README](README_OLD.md).
-
-## Reports
-
-The **Overview** shows the high-level Codex and Claude Code rate-limit and
-model summaries. Use the link beneath **Codex Models** or **Claude Code Models**
-to open the corresponding detail view. The Codex detail view includes reset
-credits, profile statistics, local totals, daily usage, top sessions, and the
-optional Admin API panels. The Claude Code detail view includes local totals,
-daily usage, projects, and top sessions.
-
-| Report | Dashboard/API value | Network |
-| --- | --- | --- |
-| Overview | `report=all` | Yes |
-| Codex Usage | `report=codex-usage` | Yes; includes reset credits, local/online usage, and optional Admin API usage/costs |
-| Claude Code Usage | `report=claude-usage` | No |
-| Isambard Service Status | `report=isambard-status` | Yes, public pages; cached locally |
-
-## Dashboard API
-
-The web server also exposes local JSON endpoints:
+The web server exposes:
 
 ```text
 GET /
@@ -211,56 +197,71 @@ Example:
 http://127.0.0.1:8765/api/usage?report=codex-usage&top=10&days=30
 ```
 
-Common query parameters:
-
 | Parameter | Meaning | Default |
 | --- | --- | --- |
 | `report` | `all`, `codex-usage`, `claude-usage`, or `isambard-status` | `all` |
-| `top` | Number of ranked rows to return | `10` |
+| `top` | Maximum ranked rows | `10` |
 | `days` | Recent local daily window | `30` |
-| `warn_days` | Reset-expiry warning window | `7` |
-| `bucket_width` | API usage bucket width: `1d`, `1h`, or `1m` | `1d` |
-| `limit` | Optional API usage bucket limit | empty |
-| `group_by` | Optional API usage grouping field, repeatable or comma-separated | empty |
-| `no_costs` | Skip API costs query with `1`, `true`, or `yes` | `false` |
+| `warn_days` | Reset-credit expiry warning window | `7` |
+| `bucket_width` | Admin API bucket width: `1d`, `1h`, or `1m` | `1d` |
+| `limit` | Optional Admin API bucket limit | empty |
+| `group_by` | Optional Admin API grouping field; repeat or comma-separate | empty |
+| `no_costs` | Skip the Admin API costs request with `1`, `true`, or `yes` | `false` |
 | `isambard_force_refresh` | Bypass the Isambard cache with `1`, `true`, or `yes` | `false` |
 
-## Screenshots
+## Standalone Collectors and Original CLI
 
-<!-- markdownlint-disable MD033 -- HTML is used here so GitHub can render bounded thumbnails that link to the full-size screenshots. -->
-<p>
-  <a href="img/dashboard/1.png"><img src="img/dashboard/1.png" alt="Overview with Codex and Claude Code rate limits" width="220"></a>
-  <a href="img/dashboard/2.png"><img src="img/dashboard/2.png" alt="Overview with Service Status and Model Detail Links" width="220"></a>
-  <a href="img/dashboard/3.png"><img src="img/dashboard/3.png" alt="Codex Usage Detail View" width="220"></a>
-  <a href="img/dashboard/4.png"><img src="img/dashboard/4.png" alt="Codex Daily Local Usage and Reset Credits" width="220"></a>
-  <a href="img/dashboard/5.png"><img src="img/dashboard/5.png" alt="Claude Code Usage Detail View" width="220"></a>
-  <a href="img/dashboard/6.png"><img src="img/dashboard/6.png" alt="Isambard Service Status in Chinese" width="220"></a>
-</p>
-<!-- markdownlint-enable MD033 -->
+The collectors can also be used without the web dashboard:
+
+```sh
+python3 claude_usage.py
+python3 codex_usage.py
+python3 codex_usage.py local-usage --top 20 --days 60
+python3 codex_usage.py export --report all --format json
+```
+
+Running `codex_usage.py` interactively opens its menu. See
+[README_OLD.md](README_OLD.md) for its complete command, export, and
+troubleshooting guide.
+
+## Configuration
+
+| Environment variable | Purpose |
+| --- | --- |
+| `CODEX_HOME` | Use a Codex data directory other than `~/.codex` |
+| `CLAUDE_CONFIG_DIR` | Use a Claude Code data directory other than `~/.claude` |
+| `CLAUDE_USAGE_SNAPSHOT` | Store/read the Claude rate-limit snapshot at another path |
+| `CLAUDE_USAGE_STALE_SECONDS` | Override the default 15-minute Claude snapshot stale threshold |
+| `OPENAI_ADMIN_KEY` | Enable optional OpenAI organisation usage and cost queries |
+
+## Privacy and Limitations
+
+- The server listens on `127.0.0.1` by default.
+- Local Codex and Claude files are read but not modified.
+- Claude streaming rows are deduplicated before token totals are calculated.
+- The Claude statusLine bridge never reads or reuses Claude OAuth credentials.
+- Codex reset-credit and online-profile requests are read-only.
+- OpenAI Admin API access is optional and uses documented endpoints.
+- Isambard data comes from public status pages; only parsed cache data is kept.
+- Individual collectors fail independently so one unavailable source does not
+  take down the whole dashboard.
+
+Some Codex subscription endpoints used by the upstream-derived collector are
+undocumented and may change. Treat all displayed values as operational
+information rather than a contractual billing statement. Do not commit API
+keys, `auth.json`, private exports, cached account data, or sensitive
+screenshots.
 
 ## Documentation
 
-- [README.zh-CN.md](README.zh-CN.md): Chinese version of this README.
-- [WEB_DASHBOARD.md](WEB_DASHBOARD.md): details for the local web dashboard.
-- [README_OLD.md](README_OLD.md): the original long-form README for the
-  CLI-focused version.
+- [README.zh-CN.md](README.zh-CN.md): Chinese version.
+- [WEB_DASHBOARD.md](WEB_DASHBOARD.md): detailed dashboard behaviour and data
+  sources.
+- [README_OLD.md](README_OLD.md): preserved documentation for the
+  upstream-derived Codex CLI.
 
-## Privacy And Safety
+## License
 
-- The local dashboard serves from `127.0.0.1` by default.
-- Local usage is read from Codex files on your machine.
-- Claude Code tokens are read from `~/.claude/projects/**/*.jsonl`. Repeated
-  streaming rows are deduplicated by request/message identity before summing.
-- Claude rate limits come from the documented local statusLine payload; the
-  dashboard never reads or reuses Claude OAuth credentials.
-- Reset credits and online usage/profile reports use read-only Codex backend
-  requests.
-- The optional Admin API section within `codex-usage` uses documented OpenAI Admin API endpoints.
-- The Isambard view reads two public status pages and stores only the parsed
-  result in the ignored `isambard_status_snapshot.json` local cache.
-- Do not commit `OPENAI_ADMIN_KEY`, Codex `auth.json`, exported private reports,
-  or screenshots containing sensitive account data.
-
-Codex backend endpoints used by the online reports are undocumented and may
-change. Treat the output as useful operational information, not as a formal
-billing statement.
+This project is distributed under the MIT License. See [LICENCE](LICENCE).
+The original MacSteini copyright notice is retained for the upstream-derived
+Codex implementation.
