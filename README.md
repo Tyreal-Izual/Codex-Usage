@@ -44,7 +44,9 @@ redistributing this project.
 - Local browser dashboard at `http://127.0.0.1:8765`.
 - Auto-refreshing usage view with a manual refresh button.
 - English / 中文 Chinese interface switch.
-- Online rate-limit view showing primary and weekly percentage left.
+- Online rate-limit view with fixed primary and weekly positions, showing the
+  percentage left for each available window and `-` for a temporarily
+  unavailable one.
 - Reset countdowns shown as days, hours, and minutes.
 - GitHub-contributions-style daily local usage heatmap.
 - SQLite model counter chart with stacked token share and per-model table.

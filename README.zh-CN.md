@@ -38,7 +38,8 @@ Codex 用量信息，以及只读的 Codex/OpenAI 相关接口数据。
 - 本地网页仪表盘：`http://127.0.0.1:8765`。
 - 自动刷新用量视图，也可以手动刷新。
 - English / 中文 Chinese 界面切换。
-- Online rate-limit 视图显示 primary 和 weekly 的剩余百分比。
+- Online rate-limit 视图固定保留 primary 和 weekly 两个位置；可用窗口显示
+  剩余百分比，暂时不可用的窗口显示 `-` 占位。
 - reset 倒计时以天、小时、分钟显示。
 - 类似 GitHub contributions 的每日本地用量热力图。
 - SQLite model counter 堆叠条形图，以及带颜色标识的模型表格。

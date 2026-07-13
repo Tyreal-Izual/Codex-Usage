@@ -1197,6 +1197,28 @@ INDEX_HTML = r"""<!doctype html>
         </div>`;
     }
 
+    function hasRateLimitWindow(window) {
+      return Boolean(window) && typeof window === "object" && Object.values(window).some((value) => value !== null && value !== undefined);
+    }
+
+    function visibleRateLimitWindows(rateLimit) {
+      const primary = get(rateLimit, ["primary_window"]);
+      const weekly = get(rateLimit, ["secondary_window"]);
+      const hasPrimary = hasRateLimitWindow(primary);
+      const hasWeekly = hasRateLimitWindow(weekly);
+
+      // When Codex temporarily has only a weekly limit, /wham/usage returns it
+      // in primary_window and omits secondary_window. Present that one window
+      // as weekly, while retaining the normal mapping when both are available.
+      if (hasPrimary && !hasWeekly) {
+        return { primary: null, weekly: primary };
+      }
+      return {
+        primary: hasPrimary ? primary : null,
+        weekly: hasWeekly ? weekly : null
+      };
+    }
+
     function parseLocalDate(value) {
       const match = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
       if (!match) {
@@ -1432,16 +1454,13 @@ INDEX_HTML = r"""<!doctype html>
       }
       const rate = get(online, ["endpoints", "rate_limit_status", "data"], {});
       const profile = get(online, ["endpoints", "profile", "data"], {});
-      const primary = get(rate, ["rate_limit", "primary_window", "used_percent"]);
-      const weekly = get(rate, ["rate_limit", "secondary_window", "used_percent"]);
-      const primaryReset = get(rate, ["rate_limit", "primary_window", "reset_after_seconds"]);
-      const weeklyReset = get(rate, ["rate_limit", "secondary_window", "reset_after_seconds"]);
+      const windows = visibleRateLimitWindows(get(rate, ["rate_limit"], {}));
       const limitRows = [
         [esc(t("plan")), esc(rate.plan_type || "-")],
         [esc(t("allowed")), esc(get(rate, ["rate_limit", "allowed"], "-"))],
         [esc(t("limitReached")), esc(get(rate, ["rate_limit", "limit_reached"], "-"))],
-        [esc(t("primaryResetsIn")), esc(fmtDurationSeconds(primaryReset))],
-        [esc(t("weeklyResetsIn")), esc(fmtDurationSeconds(weeklyReset))],
+        [esc(t("primaryResetsIn")), esc(fmtDurationSeconds(windows.primary ? windows.primary.reset_after_seconds : undefined))],
+        [esc(t("weeklyResetsIn")), esc(fmtDurationSeconds(windows.weekly ? windows.weekly.reset_after_seconds : undefined))],
         [esc(t("creditsBalance")), esc(fmtNumber(get(rate, ["credits", "balance"])))],
         [esc(t("hasCredits")), esc(get(rate, ["credits", "has_credits"], "-"))]
       ];
@@ -1452,7 +1471,7 @@ INDEX_HTML = r"""<!doctype html>
         [esc(t("mostUsedReasoningEffort")), esc(stats.most_used_reasoning_effort || "-")],
         [esc(t("reasoningEffortShare")), esc(fmtPercent(stats.most_used_reasoning_effort_percentage))]
       ];
-      const bars = `<div class="bars">${leftBar(t("primaryWindow"), primary, t("primaryHint"))}${leftBar(t("weeklyWindow"), weekly, t("weeklyHint"))}</div>`;
+      const bars = `<div class="bars">${leftBar(t("primaryWindow"), windows.primary ? windows.primary.used_percent : undefined, t("primaryHint"))}${leftBar(t("weeklyWindow"), windows.weekly ? windows.weekly.used_percent : undefined, t("weeklyHint"))}</div>`;
       return [
         panel(t("onlineRateLimits"), t("onlineSubtitle"), bars + kvGrid(limitRows), true),
         panel(t("profileStatistics"), t("profileSubtitle"), table([t("metric"), t("value")], profileRows, [1]), false, "profile")

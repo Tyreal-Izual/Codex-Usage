@@ -14,6 +14,10 @@
 - 新增 English / 中文 Chinese 语言切换，并记住上次选择。
 - `Online rate limits` 放在页面最上方。
 - `Online rate limits` 显示 primary / weekly 还剩多少百分比，而不是已使用多少。
+- `Online rate limits` 始终保留 primary 和 weekly 两个窗口的位置。后端暂时
+  取消其中一个窗口时，该位置及对应的 reset 倒计时会显示 `-` 占位；另一个
+  窗口仍显示实际数据。例如暂时没有 5h 限制但仍有 weekly 限制时，左侧
+  primary 保留占位，右侧 weekly 显示 weekly 数据。
 - reset 倒计时使用天、小时、分钟格式，例如 `6 days 3 hr 12 min`
   或 `6 天 3 小时 12 分钟`。
 - 移除了顶部那组概览小方框，让页面更紧凑。
@@ -116,7 +120,7 @@ http://127.0.0.1:8765/isambard-maintenance
 
 | 区域 | 说明 |
 | --- | --- |
-| `Online rate limits` | 在线 primary / weekly 限制，显示剩余百分比、reset 时间和账号状态 |
+| `Online rate limits` | 固定显示在线 primary / weekly 两个位置；可用窗口显示剩余百分比和 reset 时间，不可用窗口以 `-` 占位，同时显示账号状态 |
 | `Isambard service status` | 公开 Isambard 服务状态、抓取时间与缓存状态；计划维护入口会打开二级详情页 |
 | `Reset credits` | 本地可读的 reset credits 信息 |
 | `Local token totals` | 从本地 session 文件统计出的 token 总量 |
