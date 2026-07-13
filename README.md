@@ -50,6 +50,9 @@ redistributing this project.
 - SQLite model counter chart with stacked token share and per-model table.
 - Local token totals and top local sessions.
 - Optional OpenAI Admin API usage and costs through `OPENAI_ADMIN_KEY`.
+- Isambard service status in the overview or a dedicated view, with a compact
+  planned-maintenance link to its own local detail page, a five-minute cache,
+  and last-known-good fallback.
 - Original CLI reports and exports remain available; see
   [README_OLD.md](README_OLD.md) for the full CLI guide.
 
@@ -109,6 +112,24 @@ python3 codex_usage_web.py --host 127.0.0.1 --port 8765
 The dashboard binds to `127.0.0.1` by default, so it is intended for local use
 on your own machine.
 
+## Isambard Status And Planned Maintenance
+
+In the overview, `Online rate limits` is the first panel and `Isambard service
+status` is the second. You can also choose **Isambard service status** from the
+Report selector to focus on that data alone.
+
+The **Planned maintenance** item links to the full local schedule page:
+
+```text
+http://127.0.0.1:8765/isambard-maintenance
+```
+
+The normal dashboard refresh uses a local cache for up to five minutes. While
+viewing the overview or Isambard report, use **Refresh** or the maintenance
+page's **Refresh source** button to fetch the public source pages immediately.
+If a fresh request fails, the dashboard keeps displaying the last successful
+result and shows a warning.
+
 ## Original CLI
 
 The original command-line interface remains available as `codex_usage.py` and
@@ -125,6 +146,7 @@ see the preserved [old README](README_OLD.md).
 | Local usage | `report=local-usage` | No |
 | Online usage/profile | `report=online-usage` | Yes |
 | OpenAI API usage/costs | `report=api-usage` | Yes, needs `OPENAI_ADMIN_KEY` |
+| Isambard service status | `report=isambard-status` | Yes, public pages; cached locally |
 
 ## Dashboard API
 
@@ -132,6 +154,7 @@ The web server also exposes local JSON endpoints:
 
 ```text
 GET /
+GET /isambard-maintenance
 GET /healthz
 GET /api/usage
 ```
@@ -146,7 +169,7 @@ Common query parameters:
 
 | Parameter | Meaning | Default |
 | --- | --- | --- |
-| `report` | `all`, `resets`, `local-usage`, `online-usage`, or `api-usage` | `all` |
+| `report` | `all`, `resets`, `local-usage`, `online-usage`, `api-usage`, or `isambard-status` | `all` |
 | `top` | Number of ranked rows to return | `10` |
 | `days` | Recent local daily window | `30` |
 | `warn_days` | Reset-expiry warning window | `7` |
@@ -154,6 +177,7 @@ Common query parameters:
 | `limit` | Optional API usage bucket limit | empty |
 | `group_by` | Optional API usage grouping field, repeatable or comma-separated | empty |
 | `no_costs` | Skip API costs query with `1`, `true`, or `yes` | `false` |
+| `isambard_force_refresh` | Bypass the Isambard cache with `1`, `true`, or `yes` | `false` |
 
 ## Screenshots
 
@@ -182,6 +206,8 @@ Common query parameters:
 - Reset credits and online usage/profile reports use read-only Codex backend
   requests.
 - The optional `api-usage` report uses documented OpenAI Admin API endpoints.
+- The Isambard view reads two public status pages and stores only the parsed
+  result in the ignored `isambard_status_snapshot.json` local cache.
 - Do not commit `OPENAI_ADMIN_KEY`, Codex `auth.json`, exported private reports,
   or screenshots containing sensitive account data.
 

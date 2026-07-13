@@ -21,6 +21,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Callable
 
 import codex_usage
+import isambard_status
 
 
 DEFAULT_HOST = "127.0.0.1"
@@ -434,6 +435,57 @@ INDEX_HTML = r"""<!doctype html>
       color: var(--warn);
     }
 
+    .maintenance-link {
+      color: var(--accent);
+      font-weight: 800;
+      text-decoration: none;
+    }
+
+    .maintenance-link:hover {
+      text-decoration: underline;
+    }
+
+    .service-cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 10px;
+    }
+
+    .service-card {
+      border: 1px solid var(--line);
+      border-left: 4px solid var(--muted);
+      border-radius: 8px;
+      background: var(--field);
+    }
+
+    .service-card.ok { border-left-color: var(--good); }
+    .service-card.warning { border-left-color: var(--warn); }
+    .service-card.outage { border-left-color: var(--bad); }
+
+    .service-card summary {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 11px 12px;
+      cursor: pointer;
+      font-weight: 800;
+    }
+
+    .service-card summary::marker { color: var(--muted); }
+
+    .service-card summary span:first-child {
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
+
+    .service-card p {
+      margin: 0;
+      padding: 0 12px 12px;
+      color: var(--muted);
+      white-space: pre-line;
+    }
+
     .heatmap-wrap {
       display: grid;
       gap: 12px;
@@ -631,6 +683,7 @@ INDEX_HTML = r"""<!doctype html>
           <option value="resets" data-i18n="reportResets">Reset credits only</option>
           <option value="online-usage" data-i18n="reportOnline">Online usage/profile only</option>
           <option value="api-usage" data-i18n="reportApi">OpenAI API usage/costs</option>
+          <option value="isambard-status" data-i18n="reportIsambard">Isambard service status</option>
         </select>
       </label>
       <label>
@@ -685,6 +738,7 @@ INDEX_HTML = r"""<!doctype html>
         reportResets: "Reset credits only",
         reportOnline: "Online usage/profile only",
         reportApi: "OpenAI API usage/costs",
+        reportIsambard: "Isambard service status",
         language: "Language",
         topRows: "Top rows",
         localDays: "Local days",
@@ -783,7 +837,22 @@ INDEX_HTML = r"""<!doctype html>
         inputTokens: "Input tokens",
         cachedInputTokens: "Cached input tokens",
         outputTokens: "Output tokens",
-        reasoningOutputTokens: "Reasoning output tokens"
+        reasoningOutputTokens: "Reasoning output tokens",
+        isambardStatus: "Isambard service status",
+        isambardSubtitle: "Public service-status and planned-maintenance pages",
+        serviceStatus: "Current service status",
+        plannedMaintenance: "Planned maintenance",
+        fetchedAt: "Source fetched",
+        dataSource: "Data source",
+        liveFetch: "Live fetch",
+        cachedData: "Cached result",
+        cacheAge: "Cache age",
+        maintenanceWindows: "maintenance windows",
+        viewMaintenance: "View full schedule →",
+        operational: "Operational",
+        degraded: "Warning",
+        outage: "Outage",
+        unknown: "Unknown"
       },
       zh: {
         appTitle: "Codex 用量仪表盘",
@@ -796,6 +865,7 @@ INDEX_HTML = r"""<!doctype html>
         reportResets: "只看重置额度",
         reportOnline: "只看在线用量 / 资料",
         reportApi: "OpenAI API 用量 / 成本",
+        reportIsambard: "Isambard 服务状态",
         language: "语言",
         topRows: "顶部行数",
         localDays: "本地天数",
@@ -894,7 +964,22 @@ INDEX_HTML = r"""<!doctype html>
         inputTokens: "输入 token",
         cachedInputTokens: "缓存输入 token",
         outputTokens: "输出 token",
-        reasoningOutputTokens: "推理输出 token"
+        reasoningOutputTokens: "推理输出 token",
+        isambardStatus: "Isambard 服务状态",
+        isambardSubtitle: "公开服务状态和计划维护页面",
+        serviceStatus: "当前服务状态",
+        plannedMaintenance: "计划维护",
+        fetchedAt: "源数据抓取时间",
+        dataSource: "数据来源",
+        liveFetch: "实时抓取",
+        cachedData: "缓存结果",
+        cacheAge: "缓存时长",
+        maintenanceWindows: "个维护窗口",
+        viewMaintenance: "查看完整维护计划 →",
+        operational: "正常",
+        degraded: "警告",
+        outage: "中断",
+        unknown: "未知"
       }
     };
 
@@ -1264,7 +1349,8 @@ INDEX_HTML = r"""<!doctype html>
         resets: data?.reset_credits || (report === "resets" ? data : null),
         local: data?.local_usage || (report === "local-usage" ? data : null),
         online: data?.online_usage || (report === "online-usage" ? data : null),
-        api: data?.api_usage || (report === "api-usage" ? data : null)
+        api: data?.api_usage || (report === "api-usage" ? data : null),
+        isambard: data?.isambard_status || (report === "isambard-status" ? data : null)
       };
     }
 
@@ -1414,6 +1500,42 @@ INDEX_HTML = r"""<!doctype html>
       ];
     }
 
+    function isambardStatusKind(item) {
+      const sourceClass = String(item?.class || "").toLowerCase();
+      const title = String(item?.title || "").toLowerCase();
+      if (sourceClass.includes("success") || title.includes("no known issue")) return "ok";
+      if (sourceClass.includes("warning") || title.includes("degraded") || title.includes("at risk")) return "warning";
+      if (sourceClass.includes("failure") || title.includes("outage")) return "outage";
+      return "unknown";
+    }
+
+    function isambardStatusLabel(kind) {
+      return { ok: t("operational"), warning: t("degraded"), outage: t("outage"), unknown: t("unknown") }[kind] || t("unknown");
+    }
+
+    function renderIsambard(isambard) {
+      if (!isambard) return [];
+      const snapshot = isambard.status || {};
+      const statuses = Array.isArray(snapshot.statuses) ? snapshot.statuses : [];
+      const source = isambard.source === "live" ? "live" : "cache";
+      const rows = Array.isArray(snapshot.maintenance_rows) ? snapshot.maintenance_rows : [];
+      const sourceRows = [
+        [esc(t("fetchedAt")), esc(snapshot.fetched_at || "-")],
+        [esc(t("dataSource")), esc(source === "live" ? t("liveFetch") : t("cachedData"))]
+      ];
+      if (source === "cache") sourceRows.push([esc(t("cacheAge")), esc(fmtDurationSeconds(isambard.cache_age_seconds))]);
+      sourceRows.push([
+        esc(t("plannedMaintenance")),
+        `<a class="maintenance-link" href="/isambard-maintenance">${esc(`${fmtNumber(rows.length)} ${t("maintenanceWindows")}`)} · ${esc(t("viewMaintenance"))}</a>`
+      ]);
+      const cards = statuses.map((item) => {
+        const kind = isambardStatusKind(item);
+        const tone = kind === "ok" ? "" : kind === "outage" ? "bad" : "warn";
+        return `<details class="service-card ${esc(kind)}"><summary><span>${esc(item.title || "-")}</span>${pill(isambardStatusLabel(kind), tone)}</summary><p>${esc(item.body || t("emptySection"))}</p></details>`;
+      }).join("") || `<div class="empty">${esc(t("emptySection"))}</div>`;
+      return [panel(t("isambardStatus"), t("isambardSubtitle"), kvGrid(sourceRows) + `<div class="subtle">${esc(t("serviceStatus"))}</div><div class="service-cards">${cards}</div>`, true)];
+    }
+
     function render(payload) {
       const report = payload.report;
       const data = payload.data || {};
@@ -1430,6 +1552,9 @@ INDEX_HTML = r"""<!doctype html>
         }
         if (sectionData.ok === false) {
           warnings.push(`${name}: ${summarizeError(sectionData.error || "not available")}`);
+        }
+        if (sectionData.warning) {
+          warnings.push(`${name}: ${summarizeError(sectionData.warning)}`);
         }
         if (sectionData.endpoints && typeof sectionData.endpoints === "object") {
           for (const [endpointName, endpoint] of Object.entries(sectionData.endpoints)) {
@@ -1450,6 +1575,7 @@ INDEX_HTML = r"""<!doctype html>
       const pairedPanels = [profilePanel, dailyPanel].filter(Boolean);
       const panels = [
         ...onlinePanels,
+        ...renderIsambard(sections.isambard),
         ...pairedPanels,
         ...renderResets(sections.resets),
         ...localPanels,
@@ -1458,7 +1584,7 @@ INDEX_HTML = r"""<!doctype html>
       $("sections").innerHTML = packSections(panels);
     }
 
-    function queryUrl() {
+    function queryUrl(forceIsambardRefresh = false) {
       const params = new URLSearchParams({
         report: $("report").value,
         top: $("top").value,
@@ -1466,10 +1592,13 @@ INDEX_HTML = r"""<!doctype html>
         warn_days: "7",
         _: Date.now().toString()
       });
+      if (forceIsambardRefresh && ["all", "isambard-status"].includes($("report").value)) {
+        params.set("isambard_force_refresh", "true");
+      }
       return `/api/usage?${params.toString()}`;
     }
 
-    async function refresh() {
+    async function refresh(forceIsambardRefresh = false) {
       if (state.loading) {
         return;
       }
@@ -1477,7 +1606,7 @@ INDEX_HTML = r"""<!doctype html>
       $("refresh-now").disabled = true;
       setStatus(t("refreshing"), t("refreshingDetail"));
       try {
-        const response = await fetch(queryUrl(), { cache: "no-store" });
+        const response = await fetch(queryUrl(forceIsambardRefresh), { cache: "no-store" });
         const payload = await response.json();
         if (!response.ok) {
           throw new Error(payload.error || `HTTP ${response.status}`);
@@ -1508,7 +1637,7 @@ INDEX_HTML = r"""<!doctype html>
       }
     }
 
-    $("refresh-now").addEventListener("click", refresh);
+    $("refresh-now").addEventListener("click", () => refresh(true));
     $("report").addEventListener("change", refresh);
     $("top").addEventListener("change", refresh);
     $("days").addEventListener("change", refresh);
@@ -1530,6 +1659,58 @@ INDEX_HTML = r"""<!doctype html>
     applyLanguage();
     setStatus(t("statusStarting"), t("statusWaiting"));
     refresh();
+  </script>
+</body>
+</html>
+"""
+
+
+MAINTENANCE_HTML = r"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Planned maintenance</title>
+  <style>
+    :root { color-scheme: dark; --bg:#0b1110; --ink:#eef7f3; --muted:#9badac; --panel:#121b1a; --panel-strong:#172321; --line:#263534; --accent:#46d3b8; --bad:#ff786d; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+    main { width:min(1180px,calc(100vw - 32px)); margin:0 auto; padding:24px 0 42px; }
+    a { color:var(--accent); font-weight:800; text-decoration:none; }
+    a:hover { text-decoration:underline; }
+    header { display:flex; justify-content:space-between; gap:18px; margin:18px 0; }
+    h1,h2 { margin:0; }
+    .meta { margin:6px 0 0; color:var(--muted); }
+    button { min-height:38px; border:0; border-radius:6px; background:var(--accent); color:#06110f; padding:8px 14px; font:inherit; font-weight:800; cursor:pointer; }
+    section { overflow:hidden; border:1px solid var(--line); border-radius:8px; background:var(--panel); }
+    section h2 { padding:13px 14px; border-bottom:1px solid var(--line); background:var(--panel-strong); font-size:16px; }
+    .body { padding:14px; }
+    .notice { display:none; margin-bottom:18px; padding:11px 12px; border:1px solid #66302c; border-radius:8px; color:var(--bad); white-space:pre-wrap; }
+    .notice.show { display:block; }
+    .table-wrap { overflow-x:auto; }
+    table { width:100%; min-width:760px; border-collapse:collapse; }
+    th,td { padding:10px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; }
+    th { color:var(--muted); font-size:12px; text-transform:uppercase; }
+    .empty { padding:18px; color:var(--muted); text-align:center; }
+    @media (max-width:640px) { main { width:min(100vw - 22px,1180px); padding-top:16px; } header { display:grid; } }
+  </style>
+</head>
+<body>
+  <main>
+    <a href="/" id="back">← Back to dashboard</a>
+    <header><div><h1 id="title">Planned maintenance</h1><p id="meta" class="meta"></p></div><button id="refresh">Refresh source</button></header>
+    <div id="notice" class="notice"></div>
+    <section><h2 id="schedule">Maintenance schedule</h2><div id="content" class="body"><div class="empty">Loading…</div></div></section>
+  </main>
+  <script>
+    const zh = (localStorage.getItem("codexUsageLanguage") || navigator.language || "").toLowerCase().startsWith("zh");
+    const text = zh ? {back:"← 返回仪表盘", title:"计划维护", schedule:"维护计划", refresh:"刷新源数据", loading:"正在加载…", empty:"当前没有列出的计划维护。", fetched:"源数据抓取时间", live:"实时抓取", cache:"缓存结果", failed:"无法加载维护详情。"} : {back:"← Back to dashboard", title:"Planned maintenance", schedule:"Maintenance schedule", refresh:"Refresh source", loading:"Loading…", empty:"No planned maintenance is currently listed.", fetched:"Source fetched", live:"Live fetch", cache:"Cached result", failed:"Could not load maintenance details."};
+    const $ = (id) => document.getElementById(id);
+    const esc = (value) => String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
+    $("back").textContent=text.back; $("title").textContent=text.title; $("schedule").textContent=text.schedule; $("refresh").textContent=text.refresh;
+    function table(headers, rows) { if (!headers.length) return `<div class="empty">${esc(text.empty)}</div>`; const head=headers.map((cell)=>`<th>${esc(cell)}</th>`).join(""); const body=rows.length ? rows.map((row)=>`<tr>${row.map((cell)=>`<td>${esc(cell)}</td>`).join("")}</tr>`).join("") : `<tr><td colspan="${headers.length}">${esc(text.empty)}</td></tr>`; return `<div class="table-wrap"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`; }
+    async function load(force=false) { try { const params=new URLSearchParams({report:"isambard-status",_:Date.now().toString()}); if (force) params.set("isambard_force_refresh","true"); const response=await fetch(`/api/usage?${params.toString()}`,{cache:"no-store"}); const payload=await response.json(); const data=payload.data || {}; if (!response.ok || !data.status) throw new Error(data.error?.message || text.failed); const status=data.status; $("content").innerHTML=table(Array.isArray(status.maintenance_headers)?status.maintenance_headers:[],Array.isArray(status.maintenance_rows)?status.maintenance_rows:[]); $("meta").textContent=`${text.fetched}: ${status.fetched_at || "-"} · ${data.source === "live" ? text.live : text.cache}`; $("notice").textContent=data.warning || ""; $("notice").classList.toggle("show",Boolean(data.warning)); } catch (error) { $("notice").textContent=error.message || text.failed; $("notice").classList.add("show"); $("content").innerHTML=`<div class="empty">${esc(text.failed)}</div>`; } }
+    $("refresh").addEventListener("click",()=>load(true)); load();
   </script>
 </body>
 </html>
@@ -1604,6 +1785,7 @@ def collect_report(
     limit: int | None,
     group_by: list[str],
     no_costs: bool,
+    isambard_force_refresh: bool,
 ) -> tuple[dict[str, Any], list[dict[str, str]]]:
     errors: list[dict[str, str]] = []
 
@@ -1621,12 +1803,19 @@ def collect_report(
         online_data, error = safe_collect("online_usage", codex_usage.collect_online_usage)
         if error:
             errors.append(error)
+        isambard_data, error = safe_collect(
+            "isambard_status",
+            lambda: isambard_status.collect_status(force_refresh=isambard_force_refresh),
+        )
+        if error:
+            errors.append(error)
         return (
             {
                 "retrieved_at_local": codex_usage.local_now_text(),
                 "reset_credits": reset_data,
                 "local_usage": local_data,
                 "online_usage": online_data,
+                "isambard_status": isambard_data,
             },
             errors,
         )
@@ -1651,6 +1840,11 @@ def collect_report(
             no_costs=no_costs,
         )
         data, error = safe_collect("api_usage", lambda: codex_usage.collect_api_usage(args))
+    elif report == "isambard-status":
+        data, error = safe_collect(
+            "isambard_status",
+            lambda: isambard_status.collect_status(force_refresh=isambard_force_refresh),
+        )
     else:
         data = {
             "ok": False,
@@ -1678,7 +1872,7 @@ def report_has_error(data: Any) -> bool:
         for item in endpoints.values():
             if isinstance(item, dict) and item.get("ok") is False:
                 return True
-    for key in ("reset_credits", "local_usage", "online_usage", "api_usage"):
+    for key in ("reset_credits", "local_usage", "online_usage", "api_usage", "isambard_status"):
         if report_has_error(data.get(key)):
             return True
     return False
@@ -1692,6 +1886,9 @@ class UsageWebHandler(BaseHTTPRequestHandler):
         if parsed.path in {"/", "/index.html"}:
             self.send_html(include_body=False)
             return
+        if parsed.path == "/isambard-maintenance":
+            self.send_maintenance_html(include_body=False)
+            return
         if parsed.path == "/healthz":
             self.send_json({"ok": True, "time": time.time()}, include_body=False)
             return
@@ -1701,6 +1898,9 @@ class UsageWebHandler(BaseHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         if parsed.path in {"/", "/index.html"}:
             self.send_html()
+            return
+        if parsed.path == "/isambard-maintenance":
+            self.send_maintenance_html()
             return
         if parsed.path == "/api/usage":
             self.send_usage(parsed.query)
@@ -1725,6 +1925,16 @@ class UsageWebHandler(BaseHTTPRequestHandler):
         if include_body:
             self.wfile.write(body)
 
+    def send_maintenance_html(self, include_body: bool = True) -> None:
+        body = MAINTENANCE_HTML.encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        if include_body:
+            self.wfile.write(body)
+
     def send_usage(self, raw_query: str) -> None:
         query = urllib.parse.parse_qs(raw_query)
         report = query.get("report", ["all"])[0]
@@ -1737,6 +1947,7 @@ class UsageWebHandler(BaseHTTPRequestHandler):
         limit = optional_positive_int_query(query, "limit")
         group_by = list_query(query, "group_by")
         no_costs = query.get("no_costs", ["false"])[0].lower() in {"1", "true", "yes"}
+        isambard_force_refresh = query.get("isambard_force_refresh", ["false"])[0].lower() in {"1", "true", "yes"}
 
         data, errors = collect_report(
             report=report,
@@ -1747,6 +1958,7 @@ class UsageWebHandler(BaseHTTPRequestHandler):
             limit=limit,
             group_by=group_by,
             no_costs=no_costs,
+            isambard_force_refresh=isambard_force_refresh,
         )
         payload = {
             "ok": not errors and not report_has_error(data),
@@ -1760,6 +1972,7 @@ class UsageWebHandler(BaseHTTPRequestHandler):
                 "limit": limit,
                 "group_by": group_by,
                 "no_costs": no_costs,
+                "isambard_force_refresh": isambard_force_refresh,
             },
             "errors": errors,
             "data": data,

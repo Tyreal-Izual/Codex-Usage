@@ -44,6 +44,8 @@ Codex 用量信息，以及只读的 Codex/OpenAI 相关接口数据。
 - SQLite model counter 堆叠条形图，以及带颜色标识的模型表格。
 - 本地 token 总量和最高用量 session。
 - 可选的 OpenAI Admin API 用量和成本视图，需要 `OPENAI_ADMIN_KEY`。
+- 总览和独立报告中的 Isambard 服务状态；计划维护采用紧凑的可点击入口并在独立本地
+  详情页显示，带五分钟本地缓存和上次成功结果回退。
 - 原始 CLI 报告和导出功能仍然保留；完整 CLI 指南见
   [README_OLD.md](README_OLD.md)。
 
@@ -101,6 +103,21 @@ python3 codex_usage_web.py --host 127.0.0.1 --port 8765
 
 仪表盘默认绑定到 `127.0.0.1`，所以它默认只用于本机查看。
 
+## Isambard 服务状态与计划维护
+
+在总览中，`Online rate limits` 固定显示在第一位，`Isambard service status`
+显示在第二位。也可以在 `Report` 选择框中选取 `Isambard 服务状态`，只查看这类数据。
+
+面板中的 **计划维护** 会打开本机二级页：
+
+```text
+http://127.0.0.1:8765/isambard-maintenance
+```
+
+普通自动刷新最多使用五分钟本地缓存。在总览或 `Isambard 服务状态` 报告中点击
+**刷新**，或在维护详情页点击 **刷新源数据**，会立即请求公开源页面；失败时会保留
+上次成功结果并给出提示。
+
 ## 原始 CLI
 
 原始命令行工具仍然保留为 `codex_usage.py`，并且仍然是网页仪表盘使用的核心
@@ -116,6 +133,7 @@ python3 codex_usage_web.py --host 127.0.0.1 --port 8765
 | 本地用量 | `report=local-usage` | 否 |
 | 在线用量/profile | `report=online-usage` | 是 |
 | OpenAI API 用量/成本 | `report=api-usage` | 是，需要 `OPENAI_ADMIN_KEY` |
+| Isambard 服务状态 | `report=isambard-status` | 是，公开页面；本地缓存 |
 
 ## Dashboard API
 
@@ -123,6 +141,7 @@ python3 codex_usage_web.py --host 127.0.0.1 --port 8765
 
 ```text
 GET /
+GET /isambard-maintenance
 GET /healthz
 GET /api/usage
 ```
@@ -137,7 +156,7 @@ http://127.0.0.1:8765/api/usage?report=local-usage&top=10&days=30
 
 | 参数 | 作用 | 默认值 |
 | --- | --- | --- |
-| `report` | `all`, `resets`, `local-usage`, `online-usage`, 或 `api-usage` | `all` |
+| `report` | `all`, `resets`, `local-usage`, `online-usage`, `api-usage`，或 `isambard-status` | `all` |
 | `top` | 返回多少条排行数据 | `10` |
 | `days` | 最近多少天的本地每日窗口 | `30` |
 | `warn_days` | reset 即将过期提示窗口 | `7` |
@@ -145,6 +164,7 @@ http://127.0.0.1:8765/api/usage?report=local-usage&top=10&days=30
 | `limit` | 可选的 API usage bucket 数量限制 | 空 |
 | `group_by` | 可选 API usage 分组字段，可重复或用逗号分隔 | 空 |
 | `no_costs` | 用 `1`, `true`, 或 `yes` 跳过 API costs 查询 | `false` |
+| `isambard_force_refresh` | 用 `1`, `true`, 或 `yes` 跳过 Isambard 缓存 | `false` |
 
 ## 截图
 
@@ -171,6 +191,8 @@ http://127.0.0.1:8765/api/usage?report=local-usage&top=10&days=30
 - 本地用量从你机器上的 Codex 文件读取。
 - Reset credits 和在线 usage/profile 报告使用只读的 Codex 后端请求。
 - 可选的 `api-usage` 报告使用 OpenAI Admin API 官方接口。
+- Isambard 视图读取两个公开状态页面，并只在忽略的本地缓存
+  `isambard_status_snapshot.json` 中保存解析后的结果。
 - 不要提交 `OPENAI_ADMIN_KEY`、Codex `auth.json`、私有导出报告，或包含敏感账户
   信息的截图。
 
