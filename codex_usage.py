@@ -202,6 +202,24 @@ def fmt_local_timestamp(value: Any) -> str:
     return str(value)
 
 
+def unix_milliseconds(value: Any) -> int | None:
+    if isinstance(value, (int, float)) or (isinstance(value, str) and value.isdigit()):
+        try:
+            number = float(value)
+        except ValueError:
+            return None
+        if not math.isfinite(number):
+            return None
+        return round(number if number > 10_000_000_000 else number * 1000)
+    if isinstance(value, str):
+        try:
+            timestamp = datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            return None
+        return round(timestamp * 1000)
+    return None
+
+
 def parse_dt(value: str | None) -> datetime | None:
     if not value:
         return None
@@ -552,14 +570,21 @@ def redact_admin(value: Any, key: str | None = None) -> Any:
 def collect_resets() -> dict[str, Any]:
     access_token, account_id = load_auth()
     response = fetch_json("/wham/rate-limit-reset-credits", access_token, account_id)
+    retrieved_at = datetime.now().astimezone()
     if not response.get("ok"):
-        return {"retrieved_at_local": local_now_text(), "ok": False, "error": response}
+        return {
+            "retrieved_at_local": retrieved_at.strftime("%Y-%m-%d %H:%M:%S %Z %z"),
+            "retrieved_at_unix_ms": round(retrieved_at.timestamp() * 1000),
+            "ok": False,
+            "error": response,
+        }
     data = response.get("data") if isinstance(response.get("data"), dict) else {}
     credits_raw = data.get("credits", []) if isinstance(data, dict) else []
     credits = credits_raw if isinstance(credits_raw, list) else []
     normalised = [normalise_credit_for_json(c) for c in credits if isinstance(c, dict)]
     return {
-        "retrieved_at_local": local_now_text(),
+        "retrieved_at_local": retrieved_at.strftime("%Y-%m-%d %H:%M:%S %Z %z"),
+        "retrieved_at_unix_ms": round(retrieved_at.timestamp() * 1000),
         "ok": True,
         "available_count": data.get("available_count"),
         "credits_returned": len(normalised),
@@ -749,6 +774,13 @@ def sqlite_threads_summary(codex_home: Path, top_n: int) -> dict[str, Any]:
                 basic["updated_at_max"] = cur.execute(
                     "SELECT MAX(updated_at) FROM threads"
                 ).fetchone()[0]
+                if basic["updated_at_max"] not in (None, ""):
+                    basic["updated_at_max_local"] = fmt_local_timestamp(
+                        basic["updated_at_max"]
+                    )
+                    basic["updated_at_unix_ms"] = unix_milliseconds(
+                        basic["updated_at_max"]
+                    )
             if has_model and has_tokens:
                 for model, rows, tokens in cur.execute(
                     """

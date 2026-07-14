@@ -61,7 +61,9 @@ preserved in [README_OLD.md](README_OLD.md).
 - Compact toolbar with report, language, local-day window, refresh interval,
   auto-refresh, and manual refresh controls.
 - Compact panel headings for Codex reset summaries, online-data age, Claude
-  snapshot state, Isambard cache age, and planned-maintenance access.
+  snapshot state, model-data age, Isambard cache age, and planned-maintenance
+  access. Ages are shown relatively (for example, `Updated <1 min`) when a
+  source provides a timestamp.
 - Primary/5-hour and weekly/7-day limit bars with reset countdowns.
 - Local token totals, model shares, daily heatmaps, and top sessions.
 - Claude Code input, output, cache-creation, and cache-read token accounting,

@@ -1705,11 +1705,13 @@ INDEX_HTML = r"""<!doctype html>
       });
       const credits = table(["#", t("status"), t("expiresLocally"), t("timeRemaining"), t("grantedLocally")], rows, [], "reset-credits-table");
       const headerExtras = [
-        { label: t("retrieved"), value: resets.retrieved_at_local || "-" },
         { label: t("availableResets"), value: fmtNumber(resets.available_count) },
         { label: t("creditsReturned"), value: fmtNumber(resets.credits_returned) },
         { label: t("totalEarnedCount"), value: fmtNumber(resets.total_earned_count) }
       ];
+      if (asNumber(resets.retrieved_at_unix_ms) !== null) {
+        headerExtras.unshift({ label: t("retrieved"), value: fmtAgeSince(resets.retrieved_at_unix_ms) });
+      }
       return [panel(t("resetCredits"), t("resetSubtitle"), credits, true, "codex-resets", headerExtras)];
     }
 
@@ -1722,6 +1724,7 @@ INDEX_HTML = r"""<!doctype html>
       const daily = Array.isArray(sessions.daily_usage) ? sessions.daily_usage : [];
       const topSessions = Array.isArray(sessions.top_sessions_by_total_tokens) ? sessions.top_sessions_by_total_tokens : [];
       const sqliteModels = get(local, ["sqlite_threads", "selected", "by_model"], []);
+      const sqliteModelsUpdatedAt = get(local, ["sqlite_threads", "selected", "updated_at_unix_ms"]);
 
       const tokenRows = ["input_tokens", "cached_input_tokens", "output_tokens", "reasoning_output_tokens", "total_tokens"]
         .map((field) => [esc(usageFieldLabel(field)), esc(fmtNumber(totals[field]))]);
@@ -1745,10 +1748,13 @@ INDEX_HTML = r"""<!doctype html>
       const detailsLink = showDetailsLink
         ? `<a class="detail-link" href="/?report=codex-usage">${esc(t("viewCodexDetails"))}</a>`
         : "";
+      const modelHeaderExtras = asNumber(sqliteModelsUpdatedAt) !== null
+        ? [{ label: t("updated"), value: fmtAgeSince(sqliteModelsUpdatedAt) }]
+        : [];
 
       return [
         panel(t("localTokenTotals"), t("localTokenSubtitle"), table([t("field"), t("total")], tokenRows, [1]), false, "codex-totals"),
-        panel(t("sqliteModelCounters"), t("sqliteSubtitle"), sqliteModelStack(sqliteModels) + table([t("model"), t("threads"), t("tokensUsed"), t("share")], sqliteRows, [1, 2, 3], "sqlite-table") + detailsLink, false, "codex-models"),
+        panel(t("sqliteModelCounters"), t("sqliteSubtitle"), sqliteModelStack(sqliteModels) + table([t("model"), t("threads"), t("tokensUsed"), t("share")], sqliteRows, [1, 2, 3], "sqlite-table") + detailsLink, false, "codex-models", modelHeaderExtras),
         panel(t("dailyLocalUsage"), `${daily.length} ${t("dayWindow")}`, dailyHeatmap(daily), false, "daily"),
         panel(t("topSessions"), t("topSessionsSubtitle"), table([t("date"), t("model"), t("total"), t("output"), t("project"), t("sessionFile")], topRows, [2, 3]), true, "codex-sessions")
       ];
@@ -1840,6 +1846,7 @@ INDEX_HTML = r"""<!doctype html>
       ]);
 
       const models = Array.isArray(local.by_model) ? local.by_model : [];
+      const modelsUpdatedAt = local.latest_record_at_unix_ms;
       const modelTotal = models.reduce((sum, row) => sum + (asNumber(row.total_tokens) || 0), 0);
       const modelRows = models.map((row, index) => [
         sqliteModelKey(row.model || "-", index),
@@ -1871,11 +1878,14 @@ INDEX_HTML = r"""<!doctype html>
       const detailsLink = showDetailsLink
         ? `<a class="detail-link" href="/?report=claude-usage">${esc(t("viewClaudeDetails"))}</a>`
         : "";
+      const modelHeaderExtras = asNumber(modelsUpdatedAt) !== null
+        ? [{ label: t("updated"), value: fmtAgeSince(modelsUpdatedAt) }]
+        : [];
 
       return [
         panel(t("claudeRateLimits"), t("claudeRateSubtitle"), bars + setup, true, "claude-rate", headerExtras),
         panel(t("claudeLocalTokens"), t("claudeLocalSubtitle"), localMeta + table([t("field"), t("total")], tokenRows, [1]), false, "claude-totals"),
-        panel(t("claudeModels"), t("claudeModelsSubtitle"), modelTokenStack(models) + table([t("model"), t("requests"), t("total"), t("share")], modelRows, [1, 2, 3]) + detailsLink, false, "claude-models"),
+        panel(t("claudeModels"), t("claudeModelsSubtitle"), modelTokenStack(models) + table([t("model"), t("requests"), t("total"), t("share")], modelRows, [1, 2, 3]) + detailsLink, false, "claude-models", modelHeaderExtras),
         panel(t("claudeDailyUsage"), `${daily.length} ${t("dayWindow")}`, dailyHeatmap(daily), false, "claude-daily"),
         panel(t("claudeProjects"), t("claudeProjectsSubtitle"), table([t("project"), t("requests"), t("input"), t("output"), t("total")], projectRows, [1, 2, 3, 4]), true, "claude-projects"),
         panel(t("claudeTopSessions"), t("claudeTopSessionsSubtitle"), table([t("date"), t("model"), t("requests"), t("total"), t("output"), t("project"), t("sessionFile")], topRows, [2, 3, 4]), true, "claude-sessions")

@@ -262,6 +262,7 @@ def aggregate_local_usage(claude_home: Path, top_n: int, days: int) -> dict[str,
     duplicate_rows = 0
     unique_records = 0
     globally_seen: set[str] = set()
+    latest_record_at: datetime | None = None
 
     with _CACHE_LOCK:
         live_paths = {str(path) for path in files}
@@ -282,6 +283,12 @@ def aggregate_local_usage(claude_home: Path, top_n: int, days: int) -> dict[str,
                     continue
                 globally_seen.add(key)
                 unique_records += 1
+
+                record_at = parse_timestamp(record.get("timestamp"))
+                if record_at is not None and (
+                    latest_record_at is None or record_at > latest_record_at
+                ):
+                    latest_record_at = record_at
 
                 usage = record["usage"]
                 day = record["date"]
@@ -375,6 +382,16 @@ def aggregate_local_usage(claude_home: Path, top_n: int, days: int) -> dict[str,
         "by_model": by_model[:top_n],
         "by_project": by_project[:top_n],
         "top_sessions": top_sessions,
+        "latest_record_at_local": (
+            latest_record_at.astimezone().strftime("%Y-%m-%d %H:%M:%S %Z %z")
+            if latest_record_at is not None
+            else None
+        ),
+        "latest_record_at_unix_ms": (
+            round(latest_record_at.timestamp() * 1000)
+            if latest_record_at is not None
+            else None
+        ),
     }
 
 

@@ -27,6 +27,9 @@
   `Models in session metadata`。
 - `Codex Models` 顶部使用堆叠条形图展示不同模型 token 占比。
 - `Codex Models` 表格增加颜色标识和 `Share` 百分比列。
+- `Codex Models` 与 `Claude Code Models` 的标题会在对应本地数据有可用时间戳时显示
+  相对更新时间（例如 `Updated <1 min`）；没有时间戳时不显示空占位。
+- `Codex Reset Credits` 标题中的获取时间同样使用相对时间，避免占用标题空间的完整日期。
 - `Codex Online Rate Limits` 详情区域改成 4 列，在小屏幕上会自动变成 2 列或 1 列。
 - 新增 Isambard 服务状态报告，也会显示在总览中：当前服务状态紧凑显示；计划维护
   是状态区域内的可点击入口，会在独立的本地详情页展示。正常自动刷新会复用五分钟

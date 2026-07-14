@@ -56,7 +56,8 @@ Claude Code 用量以及 Isambard 服务信息。
 - 中英文界面，并在本地记住语言选择。
 - 紧凑工具栏，保留报告、语言、本地天数、刷新间隔、自动刷新和手动刷新控件。
 - 紧凑卡片标题，在标题区域显示 Codex 重置摘要、在线数据更新时间、Claude 快照
-  状态、Isambard 缓存时长和计划维护入口。
+  状态、模型数据年龄、Isambard 缓存时长和计划维护入口。数据源提供时间戳时，年龄会
+  以相对时间显示，例如 `更新时间 少于 1 分钟`。
 - Primary/5 小时和 Weekly/7 天限额条及 reset 倒计时。
 - 本地 token 总量、模型占比、每日热力图和最高用量 session。
 - Claude Code input、output、cache creation 和 cache read token 统计，并按
