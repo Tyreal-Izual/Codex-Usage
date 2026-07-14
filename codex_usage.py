@@ -1209,8 +1209,10 @@ def cmd_local_usage(args: argparse.Namespace) -> None:
 
 def collect_online_usage() -> dict[str, Any]:
     access_token, account_id = load_auth()
+    retrieved_at = datetime.now().astimezone()
     out: dict[str, Any] = {
-        "retrieved_at_local": local_now_text(),
+        "retrieved_at_local": retrieved_at.strftime("%Y-%m-%d %H:%M:%S %Z %z"),
+        "retrieved_at_unix_ms": round(retrieved_at.timestamp() * 1000),
         "network_calls_made": 0,
         "endpoints": {},
         "privacy_note": "Responses are redacted before display/export. Only read-only GET endpoints are used.",

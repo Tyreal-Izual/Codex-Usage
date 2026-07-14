@@ -125,9 +125,9 @@ INDEX_HTML = r"""<!doctype html>
 
     .toolbar {
       display: grid;
-      grid-template-columns: 1.4fr 0.8fr repeat(3, minmax(110px, 0.6fr)) auto auto;
+      grid-template-columns: minmax(245px, 1.55fr) minmax(175px, 1.05fr) repeat(2, minmax(160px, 0.9fr)) auto auto;
       gap: 10px;
-      align-items: end;
+      align-items: center;
       margin-bottom: 18px;
       padding: 12px;
       border: 1px solid var(--line);
@@ -136,12 +136,18 @@ INDEX_HTML = r"""<!doctype html>
       box-shadow: var(--shadow);
     }
 
-    label {
-      display: grid;
-      gap: 5px;
+    .toolbar label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
       color: var(--muted);
       font-size: 12px;
       font-weight: 700;
+    }
+
+    .toolbar-field > span {
+      flex: 0 0 auto;
+      white-space: nowrap;
     }
 
     select,
@@ -155,6 +161,13 @@ INDEX_HTML = r"""<!doctype html>
       padding: 7px 9px;
     }
 
+    .toolbar-field select,
+    .toolbar-field input[type="number"] {
+      width: auto;
+      min-width: 0;
+      flex: 1 1 auto;
+    }
+
     .toggle {
       display: flex;
       align-items: center;
@@ -164,6 +177,11 @@ INDEX_HTML = r"""<!doctype html>
       font-size: 13px;
       font-weight: 700;
       white-space: nowrap;
+    }
+
+    .toolbar .toggle,
+    .toolbar > button {
+      justify-self: start;
     }
 
     button {
@@ -849,7 +867,7 @@ INDEX_HTML = r"""<!doctype html>
     </header>
 
     <div class="toolbar">
-      <label>
+      <label class="toolbar-field">
         <span data-i18n="report">Report</span>
         <select id="report">
           <option value="all" data-i18n="reportAll">Overview: Codex + Claude Code</option>
@@ -858,22 +876,18 @@ INDEX_HTML = r"""<!doctype html>
           <option value="isambard-status" data-i18n="reportIsambard">Isambard Service Status</option>
         </select>
       </label>
-      <label>
+      <label class="toolbar-field">
         <span data-i18n="language">Language</span>
         <select id="language">
           <option value="en">English</option>
           <option value="zh">中文 Chinese</option>
         </select>
       </label>
-      <label>
-        <span data-i18n="topRows">Top Rows</span>
-        <input id="top" type="number" min="1" max="100" value="10">
-      </label>
-      <label>
+      <label class="toolbar-field">
         <span data-i18n="localDays">Local Days</span>
         <input id="days" type="number" min="1" max="365" value="30">
       </label>
-      <label>
+      <label class="toolbar-field">
         <span data-i18n="refreshSec">Refresh Seconds</span>
         <input id="refresh" type="number" min="3" max="3600" value="__DEFAULT_REFRESH__">
       </label>
@@ -912,7 +926,6 @@ INDEX_HTML = r"""<!doctype html>
         reportClaude: "Claude Code Usage",
         reportIsambard: "Isambard Service Status",
         language: "Language",
-        topRows: "Top Rows",
         localDays: "Local Days",
         refreshSec: "Refresh Seconds",
         autoRefresh: "Auto Refresh",
@@ -945,6 +958,7 @@ INDEX_HTML = r"""<!doctype html>
         resetCredits: "Codex Reset Credits",
         resetSubtitle: "Read-only Codex reset endpoint",
         retrieved: "Retrieved",
+        updated: "Updated",
         availableResets: "Available Resets",
         creditsReturned: "Credits Returned",
         totalEarnedCount: "Total Earned Count",
@@ -1047,6 +1061,7 @@ INDEX_HTML = r"""<!doctype html>
         liveFetch: "Live Fetch",
         cachedData: "Cached Result",
         cacheAge: "Cache Age",
+        maintenanceWindow: "Maintenance Window",
         maintenanceWindows: "Maintenance Windows",
         viewMaintenance: "View full schedule →",
         operational: "Operational",
@@ -1065,7 +1080,6 @@ INDEX_HTML = r"""<!doctype html>
         reportClaude: "Claude Code 用量",
         reportIsambard: "Isambard 服务状态",
         language: "语言",
-        topRows: "顶部行数",
         localDays: "本地天数",
         refreshSec: "刷新秒数",
         autoRefresh: "自动刷新",
@@ -1098,6 +1112,7 @@ INDEX_HTML = r"""<!doctype html>
         resetCredits: "Codex 重置额度",
         resetSubtitle: "只读 Codex 重置额度接口",
         retrieved: "获取时间",
+        updated: "更新时间",
         availableResets: "可用重置次数",
         creditsReturned: "返回额度数",
         totalEarnedCount: "累计获得数",
@@ -1200,6 +1215,7 @@ INDEX_HTML = r"""<!doctype html>
         liveFetch: "实时抓取",
         cachedData: "缓存结果",
         cacheAge: "缓存时长",
+        maintenanceWindow: "个维护窗口",
         maintenanceWindows: "个维护窗口",
         viewMaintenance: "查看完整维护计划 →",
         operational: "正常",
@@ -1286,6 +1302,14 @@ INDEX_HTML = r"""<!doctype html>
         return `${hours} ${t("hr")} ${minutes} ${t("min")}`;
       }
       return `${minutes} ${t("min")}`;
+    }
+
+    function fmtAgeSince(unixMilliseconds) {
+      const timestamp = asNumber(unixMilliseconds);
+      if (timestamp === null) {
+        return "-";
+      }
+      return fmtDurationSeconds(Math.max(0, (Date.now() - timestamp) / 1000));
     }
 
     function setStatus(title, detail) {
@@ -1383,7 +1407,7 @@ INDEX_HTML = r"""<!doctype html>
         ? `<span class="${className}">${items.map((item) => `
             <span class="panel-heading-extra${item.tone ? ` panel-heading-extra--${esc(item.tone)}` : ""}">
               <span>${esc(item.label || "")}</span>
-              <strong>${esc(item.value ?? "-")}</strong>
+              <strong>${item.valueHtml || esc(item.value ?? "-")}</strong>
             </span>`).join("")}</span>`
         : "";
       const leadingExtras = renderHeaderExtras(
@@ -1679,14 +1703,14 @@ INDEX_HTML = r"""<!doctype html>
           esc(credit.granted_at_local || "-")
         ];
       });
-      const overview = table([t("metric"), t("value")], [
-        [esc(t("retrieved")), esc(resets.retrieved_at_local || "-")],
-        [esc(t("availableResets")), esc(fmtNumber(resets.available_count))],
-        [esc(t("creditsReturned")), esc(fmtNumber(resets.credits_returned))],
-        [esc(t("totalEarnedCount")), esc(fmtNumber(resets.total_earned_count))]
-      ]);
       const credits = table(["#", t("status"), t("expiresLocally"), t("timeRemaining"), t("grantedLocally")], rows, [], "reset-credits-table");
-      return [panel(t("resetCredits"), t("resetSubtitle"), overview + credits, true)];
+      const headerExtras = [
+        { label: t("retrieved"), value: resets.retrieved_at_local || "-" },
+        { label: t("availableResets"), value: fmtNumber(resets.available_count) },
+        { label: t("creditsReturned"), value: fmtNumber(resets.credits_returned) },
+        { label: t("totalEarnedCount"), value: fmtNumber(resets.total_earned_count) }
+      ];
+      return [panel(t("resetCredits"), t("resetSubtitle"), credits, true, "codex-resets", headerExtras)];
     }
 
     function renderLocal(local, showDetailsLink = false) {
@@ -1746,6 +1770,7 @@ INDEX_HTML = r"""<!doctype html>
           value: limitReached,
           tone: limitReached === true ? "bad" : limitReached === false ? "good" : ""
         },
+        { label: t("updated"), value: fmtAgeSince(online.retrieved_at_unix_ms) },
         { label: t("creditsBalance"), value: fmtNumber(get(rate, ["credits", "balance"])), position: "end" },
         { label: t("hasCredits"), value: get(rate, ["credits", "has_credits"], "-"), position: "end" }
       ];
@@ -1930,17 +1955,14 @@ INDEX_HTML = r"""<!doctype html>
       const statuses = Array.isArray(snapshot.statuses) ? snapshot.statuses : [];
       const source = isambard.source === "live" ? "live" : "cache";
       const rows = Array.isArray(snapshot.maintenance_rows) ? snapshot.maintenance_rows : [];
-      const sourceRows = [
-        [esc(t("fetchedAt")), esc(snapshot.fetched_at || "-")],
-        [esc(t("dataSource")), esc(source === "live" ? t("liveFetch") : t("cachedData"))]
+      const maintenanceLabel = rows.length === 1 ? t("maintenanceWindow") : t("maintenanceWindows");
+      const headerExtras = [
+        { label: t("cacheAge"), value: source === "cache" ? fmtDurationSeconds(isambard.cache_age_seconds) : "-" },
+        {
+          label: t("plannedMaintenance"),
+          valueHtml: `<a class="maintenance-link" href="/isambard-maintenance">${esc(`${fmtNumber(rows.length)} ${maintenanceLabel}`)} · ${esc(t("viewMaintenance"))}</a>`
+        }
       ];
-      if (source === "cache") {
-        sourceRows.push([esc(t("cacheAge")), esc(fmtDurationSeconds(isambard.cache_age_seconds))]);
-      }
-      sourceRows.push([
-        esc(t("plannedMaintenance")),
-        `<a class="maintenance-link" href="/isambard-maintenance">${esc(`${fmtNumber(rows.length)} ${t("maintenanceWindows")}`)} · ${esc(t("viewMaintenance"))}</a>`
-      ]);
       const statusCards = statuses.map((item) => {
         const kind = isambardStatusKind(item);
         const tone = kind === "ok" ? "" : kind === "outage" ? "bad" : "warn";
@@ -1959,8 +1981,10 @@ INDEX_HTML = r"""<!doctype html>
         panel(
           t("isambardStatus"),
           t("isambardSubtitle"),
-          kvGrid(sourceRows) + `<div class="subtle">${esc(t("serviceStatus"))}</div><div class="service-cards">${cards}</div>`,
-          true
+          `<div class="subtle">${esc(t("serviceStatus"))}</div><div class="service-cards">${cards}</div>`,
+          true,
+          "isambard-status",
+          headerExtras
         )
       ];
     }
@@ -2040,7 +2064,7 @@ INDEX_HTML = r"""<!doctype html>
     function queryUrl(forceIsambardRefresh = false) {
       const params = new URLSearchParams({
         report: $("report").value,
-        top: $("top").value,
+        top: "10",
         days: $("days").value,
         warn_days: "7",
         _: Date.now().toString()
@@ -2101,7 +2125,6 @@ INDEX_HTML = r"""<!doctype html>
 
     $("refresh-now").addEventListener("click", () => refresh(true));
     $("report").addEventListener("change", refresh);
-    $("top").addEventListener("change", refresh);
     $("days").addEventListener("change", refresh);
     $("refresh").addEventListener("change", schedule);
     $("auto").addEventListener("change", schedule);

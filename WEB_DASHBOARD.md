@@ -102,7 +102,6 @@ python3 codex_claude_usage_web.py --host 127.0.0.1
 | --- | --- |
 | `Report` | 选择总览、Codex 用量、Claude Code 用量，或 `Isambard 服务状态`；Codex 用量包含重置额度、本地/在线用量和可选的 Admin API 用量/成本 |
 | `Language` | 在 English 和 中文 Chinese 之间切换 |
-| `Top Rows` | 控制排行榜或表格最多显示多少行 |
 | `Local Days` | 控制本地每日用量热力图和每日数据窗口 |
 | `Refresh Seconds` | 控制自动刷新间隔 |
 | `Auto Refresh` | 开启或关闭自动刷新 |
@@ -111,8 +110,8 @@ python3 codex_claude_usage_web.py --host 127.0.0.1
 ## Isambard 服务状态与计划维护
 
 总览的固定顺序是 `Codex Online Rate Limits` 在第一位、`Isambard Service Status` 在第二位。
-Isambard 面板顶部会显示抓取时间、数据来源、缓存时长（如适用）和可点击的 **计划维护**
-入口；入口会打开：
+Isambard 面板标题行会显示缓存时长（如适用）和可点击的 **计划维护** 入口，不再显示抓取
+时间或数据来源；入口会打开：
 
 ```text
 http://127.0.0.1:8765/isambard-maintenance
@@ -133,7 +132,7 @@ http://127.0.0.1:8765/isambard-maintenance
 | `Claude Code Rate Limits` | statusLine 快照中的 5 小时/7 天剩余百分比、重置时间、快照年龄和安装状态 |
 | `Claude Code Local Token Totals` | 去重后的输入、输出、缓存创建、缓存读取和总 token |
 | `Claude Code Models` / `Claude Code Projects` / `Claude Code Daily Usage` / `Claude Code Top Sessions` | Claude 本地 JSONL 的模型、项目、每日和 session 排行 |
-| `Isambard Service Status` | 公开 Isambard 服务状态、抓取时间与缓存状态；计划维护入口会打开二级详情页 |
+| `Isambard Service Status` | 公开 Isambard 服务状态；标题行显示缓存时长和计划维护入口，入口会打开二级详情页 |
 | `Codex Reset Credits` | 本地可读的 reset credits 信息 |
 | `Codex Local Token Totals` | 从本地 session 文件统计出的 token 总量 |
 | `Codex Models` | 从本地 thread 数据库按模型聚合，包含堆叠条形图、颜色标识和占比 |
