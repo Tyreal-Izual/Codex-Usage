@@ -49,8 +49,9 @@ The codebase has two clearly separated origins:
 | `isambard_status.py`, bilingual UI, dashboard layout, and integration logic | Developed in this project |
 
 The upstream project is distributed under the MIT License. Its copyright and
-license notice remain in [LICENCE](LICENCE). The upstream CLI documentation is
-preserved in [README_OLD.md](README_OLD.md).
+license notice remain in [LICENCE](LICENCE), alongside Frederick Zou's
+copyright notice for this project's additions. The upstream CLI documentation
+is preserved in [README_OLD.md](README_OLD.md).
 
 ## Features
 
@@ -273,5 +274,6 @@ screenshots.
 ## License
 
 This project is distributed under the MIT License. See [LICENCE](LICENCE).
-The original MacSteini copyright notice is retained for the upstream-derived
-Codex implementation.
+The upstream-derived Codex implementation retains MacSteini's copyright
+notice; the dashboard, Claude Code, Isambard, and integration additions are
+copyright (c) 2026 Frederick Zou.

@@ -44,8 +44,8 @@ Claude Code 用量以及 Isambard 服务信息。
 | `claude_usage.py` 与 `claude_usage_statusline.py` | 本项目独立实现，不向 `codex_usage.py` 写入 Claude 逻辑 |
 | `isambard_status.py`、中英文界面、页面布局与整合逻辑 | 本项目实现 |
 
-上游项目采用 MIT License。原作者的版权和许可声明保留在
-[LICENCE](LICENCE) 中；上游 CLI 的原始说明保留在
+上游项目采用 MIT License。原作者的版权和许可声明与 Frederick Zou 对本项目新增内容的
+版权声明均保留在 [LICENCE](LICENCE) 中；上游 CLI 的原始说明保留在
 [README_OLD.md](README_OLD.md) 中。
 
 ## 功能概览
@@ -248,5 +248,6 @@ python3 codex_usage.py export --report all --format json
 
 ## 许可证
 
-本项目使用 MIT License，详见 [LICENCE](LICENCE)。上游派生的 Codex 实现保留了
-MacSteini 的原始版权声明。
+本项目使用 MIT License，详见 [LICENCE](LICENCE)。上游派生的 Codex 实现保留
+MacSteini 的原始版权声明；仪表盘、Claude Code、Isambard 和整合功能的新增内容
+版权归 Frederick Zou 所有（2026）。
