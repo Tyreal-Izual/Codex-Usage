@@ -21,14 +21,16 @@ Claude Code 用量以及 Isambard 服务信息。
 
 ## 页面截图
 
+点击缩略图可查看完整尺寸。前五张使用桌面布局，最后一张展示窄屏响应式布局。
+
 <!-- markdownlint-disable MD033 -- 使用 HTML 让 GitHub 截图画廊保持紧凑。 -->
 <p>
-  <a href="img/dashboard/1.png"><img src="img/dashboard/1.png" alt="Codex 与 Claude Code 限额总览" width="220"></a>
-  <a href="img/dashboard/2.png"><img src="img/dashboard/2.png" alt="Isambard 状态与模型摘要" width="220"></a>
-  <a href="img/dashboard/3.png"><img src="img/dashboard/3.png" alt="Codex 用量详情" width="220"></a>
-  <a href="img/dashboard/4.png"><img src="img/dashboard/4.png" alt="Codex 每日用量与重置额度" width="220"></a>
-  <a href="img/dashboard/5.png"><img src="img/dashboard/5.png" alt="Claude Code 用量详情" width="220"></a>
-  <a href="img/dashboard/6.png"><img src="img/dashboard/6.png" alt="中文版 Isambard 服务状态" width="220"></a>
+  <a href="img/dashboard/1.png"><img src="img/dashboard/1.png" alt="包含 Codex、Claude Code 限额、相对更新时间和 Isambard 状态的总览" width="220"></a>
+  <a href="img/dashboard/2.png"><img src="img/dashboard/2.png" alt="包含在线限额、模型更新时间和资料统计的 Codex 详情" width="220"></a>
+  <a href="img/dashboard/3.png"><img src="img/dashboard/3.png" alt="包含限额、模型更新时间和本地 token 总量的 Claude Code 详情" width="220"></a>
+  <a href="img/dashboard/4.png"><img src="img/dashboard/4.png" alt="Isambard 服务状态和计划维护入口" width="220"></a>
+  <a href="img/dashboard/5.png"><img src="img/dashboard/5.png" alt="完整的 Isambard 计划维护时间表" width="220"></a>
+  <a href="img/dashboard/6.png"><img src="img/dashboard/6.png" alt="窄屏响应式总览布局" width="220"></a>
 </p>
 <!-- markdownlint-enable MD033 -->
 

@@ -25,14 +25,17 @@ tool.
 
 ## Screenshots
 
+Click a thumbnail to open the full-size image. The first five screenshots use
+the desktop layout; the last shows the responsive narrow layout.
+
 <!-- markdownlint-disable MD033 -- HTML keeps the screenshot gallery compact on GitHub. -->
 <p>
-  <a href="img/dashboard/1.png"><img src="img/dashboard/1.png" alt="Codex and Claude Code rate-limit overview" width="220"></a>
-  <a href="img/dashboard/2.png"><img src="img/dashboard/2.png" alt="Isambard status and model summaries" width="220"></a>
-  <a href="img/dashboard/3.png"><img src="img/dashboard/3.png" alt="Codex usage details" width="220"></a>
-  <a href="img/dashboard/4.png"><img src="img/dashboard/4.png" alt="Codex daily usage and reset credits" width="220"></a>
-  <a href="img/dashboard/5.png"><img src="img/dashboard/5.png" alt="Claude Code usage details" width="220"></a>
-  <a href="img/dashboard/6.png"><img src="img/dashboard/6.png" alt="Isambard service status in Chinese" width="220"></a>
+  <a href="img/dashboard/1.png"><img src="img/dashboard/1.png" alt="Overview with Codex and Claude Code rate limits, relative ages, and Isambard status" width="220"></a>
+  <a href="img/dashboard/2.png"><img src="img/dashboard/2.png" alt="Codex usage detail with online limits, model age, and profile statistics" width="220"></a>
+  <a href="img/dashboard/3.png"><img src="img/dashboard/3.png" alt="Claude Code usage detail with rate limits, model age, and local token totals" width="220"></a>
+  <a href="img/dashboard/4.png"><img src="img/dashboard/4.png" alt="Isambard service status and planned-maintenance link" width="220"></a>
+  <a href="img/dashboard/5.png"><img src="img/dashboard/5.png" alt="Full Isambard planned-maintenance schedule" width="220"></a>
+  <a href="img/dashboard/6.png"><img src="img/dashboard/6.png" alt="Responsive narrow overview layout" width="220"></a>
 </p>
 <!-- markdownlint-enable MD033 -->
 
