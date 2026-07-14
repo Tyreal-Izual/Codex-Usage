@@ -42,7 +42,7 @@ The codebase has two clearly separated origins:
 
 | Area | Origin |
 | --- | --- |
-| `codex_usage.py` and the Codex collection/reporting foundation | Derived from [MacSteini/Codex-Usage](https://github.com/MacSteini/Codex-Usage); the file is intentionally kept separate and currently remains unchanged from the imported upstream version |
+| `codex_usage.py` and the Codex collection/reporting foundation | Derived from [MacSteini/Codex-Usage](https://github.com/MacSteini/Codex-Usage) and retained as the separate Codex core, with small integration-oriented changes such as a machine-readable retrieval timestamp |
 | Codex results displayed in the browser | Powered by the upstream-derived `codex_usage.py` collector and integrated into this project's web interface |
 | `codex_claude_usage_web.py` and the combined browser UI | Developed in this project |
 | `claude_usage.py` and `claude_usage_statusline.py` | Developed in this project; independent of `codex_usage.py` |
@@ -58,7 +58,10 @@ preserved in [README_OLD.md](README_OLD.md).
   Isambard status, and Codex/Claude model summaries.
 - Dedicated Codex and Claude Code detail views.
 - English and Chinese interface with the language choice retained locally.
-- Automatic refresh and manual refresh controls.
+- Compact toolbar with report, language, local-day window, refresh interval,
+  auto-refresh, and manual refresh controls.
+- Compact panel headings for Codex reset summaries, online-data age, Claude
+  snapshot state, Isambard cache age, and planned-maintenance access.
 - Primary/5-hour and weekly/7-day limit bars with reset countdowns.
 - Local token totals, model shares, daily heatmaps, and top sessions.
 - Claude Code input, output, cache-creation, and cache-read token accounting,
@@ -179,6 +182,11 @@ http://127.0.0.1:8765/isambard-maintenance
 Automatic dashboard refreshes reuse Isambard data for up to five minutes.
 Manual refresh bypasses that cache. If a live request fails, the most recent
 successful result remains visible with a warning.
+
+The main Isambard card keeps source metadata compact: its heading shows cache
+age when cached and a maintenance-window count linking to the full schedule.
+The overview toolbar requests the top 10 ranked rows; API callers can still use
+the `top` query parameter to choose a different limit.
 
 ## Local JSON API
 

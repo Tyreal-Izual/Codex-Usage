@@ -38,7 +38,7 @@ Claude Code 用量以及 Isambard 服务信息。
 
 | 部分 | 来源 |
 | --- | --- |
-| `codex_usage.py` 及 Codex 采集、计算和报告基础 | 派生自 [MacSteini/Codex-Usage](https://github.com/MacSteini/Codex-Usage)；该文件有意与新增功能分离，目前仍保持导入上游版本的内容不变 |
+| `codex_usage.py` 及 Codex 采集、计算和报告基础 | 派生自 [MacSteini/Codex-Usage](https://github.com/MacSteini/Codex-Usage)，并继续作为独立的 Codex 核心；本项目只加入少量面向整合的调整，例如机器可读的获取时间戳 |
 | 网页中显示的 Codex 数据结果 | 由上游派生的 `codex_usage.py` 提供数据，再集成进本项目网页 |
 | `codex_claude_usage_web.py` 与综合网页界面 | 本项目实现 |
 | `claude_usage.py` 与 `claude_usage_statusline.py` | 本项目独立实现，不向 `codex_usage.py` 写入 Claude 逻辑 |
@@ -54,7 +54,9 @@ Claude Code 用量以及 Isambard 服务信息。
   本地综合总览。
 - 独立的 Codex 与 Claude Code 详情页面。
 - 中英文界面，并在本地记住语言选择。
-- 自动刷新和手动刷新。
+- 紧凑工具栏，保留报告、语言、本地天数、刷新间隔、自动刷新和手动刷新控件。
+- 紧凑卡片标题，在标题区域显示 Codex 重置摘要、在线数据更新时间、Claude 快照
+  状态、Isambard 缓存时长和计划维护入口。
 - Primary/5 小时和 Weekly/7 天限额条及 reset 倒计时。
 - 本地 token 总量、模型占比、每日热力图和最高用量 session。
 - Claude Code input、output、cache creation 和 cache read token 统计，并按
@@ -164,6 +166,10 @@ http://127.0.0.1:8765/isambard-maintenance
 
 普通自动刷新最多复用五分钟 Isambard 缓存；手动刷新会跳过缓存。如果在线请求失败，
 页面会保留最近一次成功结果并显示警告。
+
+Isambard 主卡片会把来源元数据保持在紧凑状态：使用缓存时在标题显示缓存时长，并在标题
+提供维护窗口数量和完整计划入口。总览工具栏固定请求排行前 10 行；通过 JSON API 调用时，
+仍可使用 `top` 参数指定其他数量。
 
 ## 本地 JSON API
 
