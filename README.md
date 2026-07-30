@@ -48,7 +48,7 @@ The codebase has two clearly separated origins:
 | `codex_usage.py` and the Codex collection/reporting foundation | Derived from [MacSteini/Codex-Usage](https://github.com/MacSteini/Codex-Usage) and retained as the separate Codex core, with small integration-oriented changes such as a machine-readable retrieval timestamp |
 | Codex results displayed in the browser | Powered by the upstream-derived `codex_usage.py` collector and integrated into this project's web interface |
 | `codex_claude_usage_web.py` and the combined browser UI | Developed in this project |
-| `claude_usage.py` and `claude_usage_statusline.py` | Developed in this project; independent of `codex_usage.py` |
+| `claude_usage.py`, `claude_usage_statusline.py`, and `claude_usage_refresher.py` | Developed in this project; independent of `codex_usage.py` |
 | `isambard_status.py`, bilingual UI, dashboard layout, and integration logic | Developed in this project |
 
 The upstream project is distributed under the MIT License. Its copyright and
@@ -74,6 +74,8 @@ is preserved in [README_OLD.md](README_OLD.md).
   deduplicated by request/message identity.
 - Claude Code model, project, session, and daily breakdowns, including subagent
   JSONL files.
+- Optional macOS background refresh for the Claude Code rate-limit snapshot,
+  without submitting prompts.
 - Optional OpenAI organisation usage and cost data through
   `OPENAI_ADMIN_KEY`.
 - Isambard service status and planned maintenance, with a five-minute cache
@@ -92,6 +94,8 @@ is preserved in [README_OLD.md](README_OLD.md).
 - `OPENAI_ADMIN_KEY` only for the optional OpenAI Admin API section.
 
 No package installation or third-party Python dependency is required.
+The optional macOS background refresher uses the system-provided
+`/usr/bin/expect` and `launchd`.
 
 ## Quick Start
 
@@ -163,12 +167,49 @@ python3 claude_usage_statusline.py --status
 python3 claude_usage_statusline.py --uninstall
 ```
 
-> Browser auto-refresh only rereads the latest snapshot; it cannot make
-> Anthropic refresh that snapshot. Claude Desktop may update local JSONL token
-> history without invoking a custom statusLine. In that case, token charts
-> continue to change while the 5-hour/7-day snapshot becomes stale. The
-> dashboard displays snapshot age and stale state so an old value is not
-> mistaken for live account usage.
+> Browser auto-refresh only rereads the latest snapshot. Claude Desktop may
+> update local JSONL token history without invoking a custom statusLine. In
+> that case, token charts continue to change while the 5-hour/7-day snapshot
+> becomes stale. The dashboard displays snapshot age and stale state so an old
+> value is not mistaken for live account usage.
+
+### Optional background snapshot refresh on macOS
+
+`claude_usage_refresher.py` opens a temporary empty Claude Code session for this
+repository, runs Claude Code's local `/usage` command, parses only the 5-hour
+and weekly percentages/reset times, writes the same sanitised snapshot format,
+and exits with `Ctrl-D`. `/usage` reads plan limits without submitting a prompt
+to the model. The refresher does not resume a conversation or retain terminal
+output, and it can work independently of the statusLine bridge. Claude Code
+must already be signed in and this repository must have been trusted once.
+
+Test one refresh first:
+
+```sh
+python3 claude_usage_refresher.py --once --force
+```
+
+Install a per-user LaunchAgent that checks every ten minutes:
+
+```sh
+python3 claude_usage_refresher.py --install
+python3 claude_usage_refresher.py --status
+```
+
+Remove it with:
+
+```sh
+python3 claude_usage_refresher.py --uninstall
+```
+
+The scheduled run skips a snapshot newer than eight minutes, gives Claude Code
+five seconds to start, and keeps `/usage` open for 30 seconds before parsing
+and exiting. It verifies that the snapshot was written, prevents overlapping
+runs, and terminates a stuck Claude process. Logs are stored under
+`~/.claude/usage-refresh*.log`. The job runs only while the Mac is awake and
+logged in. Re-run `--install` after moving this repository or the Claude
+executable. This is client automation rather than an Anthropic background-usage
+API, so a future Claude Code release may require adjustments.
 
 ## Dashboard Views and Data Sources
 
@@ -244,6 +285,8 @@ troubleshooting guide.
 | --- | --- |
 | `CODEX_HOME` | Use a Codex data directory other than `~/.codex` |
 | `CLAUDE_CONFIG_DIR` | Use a Claude Code data directory other than `~/.claude` |
+| `CLAUDE_BIN` | Use a specific Claude Code executable for manual refresher runs |
+| `CLAUDE_USAGE_PROJECT_DIR` | Open the refresher's temporary Claude session in another project |
 | `CLAUDE_USAGE_SNAPSHOT` | Store/read the Claude rate-limit snapshot at another path |
 | `CLAUDE_USAGE_STALE_SECONDS` | Override the default 15-minute Claude snapshot stale threshold |
 | `OPENAI_ADMIN_KEY` | Enable optional OpenAI organisation usage and cost queries |
@@ -251,9 +294,13 @@ troubleshooting guide.
 ## Privacy and Limitations
 
 - The server listens on `127.0.0.1` by default.
-- Local Codex and Claude files are read but not modified.
+- Codex and Claude transcript/state files are read but not modified; the Claude
+  bridges write only the sanitised usage snapshot and refresher support files.
 - Claude streaming rows are deduplicated before token totals are calculated.
 - The Claude statusLine bridge never reads or reuses Claude OAuth credentials.
+- The optional refresher runs the normal Claude Code client and may perform its
+  usual startup network requests or configured hooks, but sends no prompt and
+  does not resume a conversation or save its terminal output.
 - Codex reset-credit and online-profile requests are read-only.
 - OpenAI Admin API access is optional and uses documented endpoints.
 - Isambard data comes from public status pages; only parsed cache data is kept.

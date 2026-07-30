@@ -449,6 +449,8 @@ def collect_rate_limits(claude_home: Path, snapshot_path: Path) -> dict[str, Any
     base: dict[str, Any] = {
         "available": False,
         "capture_installed": installed,
+        "capture_ready": installed,
+        "capture_method": "statusline" if installed else None,
         "snapshot_path": str(snapshot_path),
         "install_command": statusline_install_command(),
         "stale_after_seconds": stale_seconds(),
@@ -474,6 +476,12 @@ def collect_rate_limits(claude_home: Path, snapshot_path: Path) -> dict[str, Any
     age = max(0, int(now_epoch - captured_epoch)) if captured_epoch is not None else None
     rate_limits = snapshot.get("rate_limits")
     rate_limits = rate_limits if isinstance(rate_limits, dict) else {}
+    source = str(snapshot.get("source") or "")
+    if source == "claude_code_usage_command":
+        base["capture_ready"] = True
+        base["capture_method"] = "usage_command"
+    elif source == "claude_code_statusline":
+        base["capture_method"] = "statusline"
     five_hour = normalise_window(rate_limits.get("five_hour"), now_epoch)
     seven_day = normalise_window(rate_limits.get("seven_day"), now_epoch)
 

@@ -1,8 +1,9 @@
 # Codex & Claude Code Local Web Dashboard
 
 这个文档记录本仓库新增的本地网页仪表盘。原来的 `codex_usage.py`
-命令行工具保持不变；Claude Code 采集放在独立的 `claude_usage.py` 和
-`claude_usage_statusline.py` 中，网页版本 `codex_claude_usage_web.py` 合并展示两类数据。
+命令行工具保持不变；Claude Code 采集与可选后台刷新放在独立的 `claude_usage.py`、
+`claude_usage_statusline.py` 和 `claude_usage_refresher.py` 中，网页版本
+`codex_claude_usage_web.py` 合并展示两类数据。
 
 ## 这次新增了什么
 
@@ -36,6 +37,9 @@
   本地缓存，手动点击刷新会请求公开状态页面。抓取失败时会显示上次成功结果。
 - 新增 Claude Code 独立报告和总览区域：5 小时/7 天剩余额度、本地 token 总量、
   每日热力图、模型、项目和最高用量 session。
+- 新增 macOS 可选后台刷新器：在临时空白会话中执行本地 `/usage`，只解析限额百分比
+  与 reset 时间并写入筛选后的快照；可通过 LaunchAgent 每 10 分钟运行一次，且不向
+  模型发送 prompt。
 - Claude JSONL 中同一响应可能重复出现，统计时按 `requestId + message.id` 去重，
   并递归包含 subagent JSONL。
 
@@ -145,6 +149,33 @@ http://127.0.0.1:8765/isambard-maintenance
 | `Admin API status` | 设置 `OPENAI_ADMIN_KEY` 后展示 OpenAI Admin API 用量和成本 |
 
 如果某一类数据读取失败，页面会继续展示其他可用区域，并在顶部提示失败原因。
+
+## Claude Code 后台快照刷新
+
+网页轮询只读取 `~/.claude/usage-dashboard.json`，不会自行启动 Claude Code。如果主要
+使用 Claude Desktop，可以在 macOS 上安装独立刷新器：
+
+```sh
+python3 claude_usage_refresher.py --once --force
+python3 claude_usage_refresher.py --install
+python3 claude_usage_refresher.py --status
+```
+
+LaunchAgent 默认每 600 秒启动一次；快照不足 480 秒时跳过。需要刷新时，脚本通过
+伪终端在当前仓库打开临时空白 Claude 会话，等待 5 秒后执行 Claude Code 的本地
+`/usage` 命令。保持 30 秒后，脚本只解析 5 小时/weekly 百分比与 reset 时间，写入
+`usage-dashboard.json`，再发送 `Ctrl-D` 退出。`/usage` 不向模型提交 prompt，脚本
+不会恢复已有会话或保存伪终端内容。脚本使用进程锁防止重叠，并在正常退出失败时终止
+残留进程。该刷新方式可以独立于 statusLine 桥接使用。
+
+卸载命令：
+
+```sh
+python3 claude_usage_refresher.py --uninstall
+```
+
+这是 Claude Code 客户端自动化，不是官方后台 API。Mac 睡眠或用户退出登录期间不会
+定时刷新；Claude Code 的启动行为或 `/usage` 页面格式变化也可能影响该功能。
 
 ## 本地接口
 

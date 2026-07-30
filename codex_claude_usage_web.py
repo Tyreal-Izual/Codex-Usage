@@ -1023,7 +1023,7 @@ INDEX_HTML = r"""<!doctype html>
         outputTokens: "Output Tokens",
         reasoningOutputTokens: "Reasoning Output Tokens",
         claudeRateLimits: "Claude Code Rate Limits",
-        claudeRateSubtitle: "Official statusLine snapshot for Claude.ai subscribers",
+        claudeRateSubtitle: "Official Claude Code subscription usage snapshot",
         claudeFiveHour: "5-Hour Window",
         claudeWeekly: "7-Day Window",
         claudeFiveHourHint: "Available before the Claude 5-hour limit is reached",
@@ -1032,9 +1032,10 @@ INDEX_HTML = r"""<!doctype html>
         claudeSnapshotState: "Snapshot State",
         claudeFresh: "Fresh",
         claudeStale: "Stale",
-        claudeCapture: "Status Line Capture",
-        claudeInstalled: "Installed",
+        claudeCapture: "Usage Capture",
         claudeNotInstalled: "Not Installed",
+        claudeStatusLine: "statusLine",
+        claudeUsageCommand: "Background /usage",
         claudeSetupTitle: "Claude rate-limit capture is not ready",
         claudeSetupHint: "Run this command once, then complete one Claude Code response:",
         claudeLocalTokens: "Claude Code Local Token Totals",
@@ -1177,7 +1178,7 @@ INDEX_HTML = r"""<!doctype html>
         outputTokens: "输出 token",
         reasoningOutputTokens: "推理输出 token",
         claudeRateLimits: "Claude Code 用量限制",
-        claudeRateSubtitle: "来自 Claude.ai 订阅 statusLine 的官方快照",
+        claudeRateSubtitle: "Claude Code 订阅用量的官方快照",
         claudeFiveHour: "5 小时窗口",
         claudeWeekly: "7 天窗口",
         claudeFiveHourHint: "距离 Claude 5 小时限制前仍可使用的比例",
@@ -1186,9 +1187,10 @@ INDEX_HTML = r"""<!doctype html>
         claudeSnapshotState: "快照状态",
         claudeFresh: "新鲜",
         claudeStale: "已过期",
-        claudeCapture: "statusLine 采集",
-        claudeInstalled: "已安装",
+        claudeCapture: "用量采集",
         claudeNotInstalled: "未安装",
+        claudeStatusLine: "statusLine",
+        claudeUsageCommand: "后台 /usage",
         claudeSetupTitle: "Claude 限额采集尚未就绪",
         claudeSetupHint: "请运行一次下面的命令，然后让 Claude Code 完成一次回复：",
         claudeLocalTokens: "Claude Code 本地 token 总量",
@@ -1804,6 +1806,10 @@ INDEX_HTML = r"""<!doctype html>
       const local = claude.local_usage || {};
       const fiveHour = rate.five_hour || null;
       const sevenDay = rate.seven_day || null;
+      const captureReady = rate.capture_ready ?? rate.capture_installed;
+      const captureValue = rate.capture_method === "usage_command"
+        ? t("claudeUsageCommand")
+        : (rate.capture_installed ? t("claudeStatusLine") : t("claudeNotInstalled"));
       const headerExtras = [
         { label: t("claudeSnapshotAge"), value: fmtDurationSeconds(rate.age_seconds) },
         {
@@ -1814,9 +1820,9 @@ INDEX_HTML = r"""<!doctype html>
         },
         {
           label: t("claudeCapture"),
-          value: rate.capture_installed ? t("claudeInstalled") : t("claudeNotInstalled"),
+          value: captureValue,
           position: "end",
-          tone: rate.capture_installed ? "good" : "warn"
+          tone: captureReady ? "good" : "warn"
         }
       ];
       const planValue = rate.plan_type || rate.plan;
@@ -1826,7 +1832,7 @@ INDEX_HTML = r"""<!doctype html>
       if (rate.limit_reached !== undefined && rate.limit_reached !== null) {
         headerExtras.push({ label: t("limitReached"), value: rate.limit_reached });
       }
-      const setup = rate.available && rate.capture_installed ? "" : `
+      const setup = rate.available && captureReady ? "" : `
         <div class="setup-callout">
           <strong>${esc(t("claudeSetupTitle"))}</strong>
           <span>${esc(t("claudeSetupHint"))}</span>

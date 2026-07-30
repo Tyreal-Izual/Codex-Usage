@@ -43,7 +43,7 @@ Claude Code 用量以及 Isambard 服务信息。
 | `codex_usage.py` 及 Codex 采集、计算和报告基础 | 派生自 [MacSteini/Codex-Usage](https://github.com/MacSteini/Codex-Usage)，并继续作为独立的 Codex 核心；本项目只加入少量面向整合的调整，例如机器可读的获取时间戳 |
 | 网页中显示的 Codex 数据结果 | 由上游派生的 `codex_usage.py` 提供数据，再集成进本项目网页 |
 | `codex_claude_usage_web.py` 与综合网页界面 | 本项目实现 |
-| `claude_usage.py` 与 `claude_usage_statusline.py` | 本项目独立实现，不向 `codex_usage.py` 写入 Claude 逻辑 |
+| `claude_usage.py`、`claude_usage_statusline.py` 与 `claude_usage_refresher.py` | 本项目独立实现，不向 `codex_usage.py` 写入 Claude 逻辑 |
 | `isambard_status.py`、中英文界面、页面布局与整合逻辑 | 本项目实现 |
 
 上游项目采用 MIT License。原作者的版权和许可声明与 Frederick Zou 对本项目新增内容的
@@ -65,6 +65,7 @@ Claude Code 用量以及 Isambard 服务信息。
 - Claude Code input、output、cache creation 和 cache read token 统计，并按
   request/message 标识去重。
 - Claude Code 模型、项目、session、每日和 subagent JSONL 统计。
+- 可选的 macOS Claude Code 限额后台快照刷新，不发送 prompt。
 - 通过 `OPENAI_ADMIN_KEY` 可选显示 OpenAI 组织用量与成本。
 - Isambard 当前服务状态和计划维护，带五分钟缓存及上次成功结果回退。
 - 供其他工具读取的本地 JSON API。
@@ -80,6 +81,7 @@ Claude Code 用量以及 Isambard 服务信息。
 - 只有可选的 OpenAI Admin API 区域需要 `OPENAI_ADMIN_KEY`。
 
 无需安装 Python 包或第三方依赖。
+可选的 macOS 后台刷新器使用系统自带的 `/usr/bin/expect` 和 `launchd`。
 
 ## 快速开始
 
@@ -147,10 +149,43 @@ python3 claude_usage_statusline.py --status
 python3 claude_usage_statusline.py --uninstall
 ```
 
-> 网页自动刷新只能重新读取已有快照，不能要求 Anthropic 更新快照。Claude Desktop
-> 可能会持续写入本地 JSONL，却不调用自定义 statusLine。此时 token 图表会继续更新，
-> 但 5 小时/7 天限额快照会逐渐过期。页面会显示 snapshot age 和 stale 状态，避免把
-> 旧数据误认为账户实时用量。
+> 网页自动刷新只能重新读取已有快照。Claude Desktop 可能会持续写入本地 JSONL，
+> 却不调用自定义 statusLine。此时 token 图表会继续更新，但 5 小时/7 天限额快照会
+> 逐渐过期。页面会显示 snapshot age 和 stale 状态，避免把旧数据误认为账户实时用量。
+
+### macOS 可选后台快照刷新
+
+`claude_usage_refresher.py` 会在本仓库打开一个临时空白 Claude Code 会话，执行本地
+`/usage` 命令，只解析 5 小时与 weekly 的百分比/reset 时间，写入同样经过筛选的快照
+格式，然后使用 `Ctrl-D` 退出。`/usage` 会读取 plan limits，但不会向模型发送
+prompt。刷新器不会恢复已有对话，也不会保存终端输出，并且可以独立于 statusLine
+桥接工作。使用前需要确保 Claude Code 已登录，并且本仓库至少被信任过一次。
+
+先测试一次刷新：
+
+```sh
+python3 claude_usage_refresher.py --once --force
+```
+
+安装用户级 LaunchAgent，每 10 分钟检查一次：
+
+```sh
+python3 claude_usage_refresher.py --install
+python3 claude_usage_refresher.py --status
+```
+
+需要移除时运行：
+
+```sh
+python3 claude_usage_refresher.py --uninstall
+```
+
+定时任务会跳过 8 分钟内刚更新的快照，给 Claude Code 5 秒启动时间，让 `/usage`
+保持打开 30 秒后解析并退出，然后确认快照已写入。它会防止重复运行，并清理卡住的
+Claude 进程。日志位于 `~/.claude/usage-refresh*.log`。任务只会在 Mac 已唤醒且用户
+已登录时运行；如果移动了仓库或 Claude 可执行文件，需要重新执行 `--install`。这是
+Claude Code 客户端自动化，并非 Anthropic 提供的后台用量 API，因此未来的 Claude
+Code 版本可能需要相应调整。
 
 ## 页面与数据来源
 
@@ -223,6 +258,8 @@ python3 codex_usage.py export --report all --format json
 | --- | --- |
 | `CODEX_HOME` | 使用 `~/.codex` 以外的 Codex 数据目录 |
 | `CLAUDE_CONFIG_DIR` | 使用 `~/.claude` 以外的 Claude Code 数据目录 |
+| `CLAUDE_BIN` | 为手动刷新指定 Claude Code 可执行文件 |
+| `CLAUDE_USAGE_PROJECT_DIR` | 在其他项目中打开刷新器的临时 Claude 会话 |
 | `CLAUDE_USAGE_SNAPSHOT` | 从其他位置保存/读取 Claude 限额快照 |
 | `CLAUDE_USAGE_STALE_SECONDS` | 修改 Claude 快照默认 15 分钟的过期判断阈值 |
 | `OPENAI_ADMIN_KEY` | 启用可选的 OpenAI 组织用量与成本请求 |
@@ -230,9 +267,12 @@ python3 codex_usage.py export --report all --format json
 ## 隐私与限制
 
 - 服务默认只监听 `127.0.0.1`。
-- 只读取本地 Codex 和 Claude 文件，不修改这些文件。
+- 不修改 Codex 和 Claude transcript/state 文件；Claude 桥接只写入经过筛选的用量快照
+  和刷新器辅助文件。
 - Claude 流式重复记录会在累计 token 前去重。
 - Claude statusLine 桥接不会读取或复用 Claude OAuth 凭据。
+- 可选刷新器会启动正常的 Claude Code 客户端，因此可能执行常规启动网络请求或已配置
+  的 hooks；但它不会发送 prompt、恢复已有对话或保存终端输出。
 - Codex reset-credit 和在线 profile 请求均为只读。
 - OpenAI Admin API 是可选功能，并使用公开文档接口。
 - Isambard 数据来自公开状态页，本地只保存解析后的缓存。
