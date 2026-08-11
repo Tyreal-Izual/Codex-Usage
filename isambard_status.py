@@ -21,6 +21,26 @@ MAINTENANCE_URL = "https://docs.isambard.ac.uk/service-status/planned_maintenanc
 DEFAULT_CACHE_PATH = Path(__file__).with_name("isambard_status_snapshot.json")
 DEFAULT_CACHE_SECONDS = 300
 USER_AGENT = "Codex-Usage-Isambard-Status/1.0 (local personal dashboard)"
+# Depth tracking assumes MkDocs/python-markdown closes every non-void tag;
+# HTMLParser does not infer omitted end tags in arbitrary hand-written HTML.
+HTML_VOID_ELEMENTS = frozenset(
+    {
+        "area",
+        "base",
+        "br",
+        "col",
+        "embed",
+        "hr",
+        "img",
+        "input",
+        "link",
+        "meta",
+        "param",
+        "source",
+        "track",
+        "wbr",
+    }
+)
 
 
 def clean_text(value: str) -> str:
@@ -35,8 +55,10 @@ class PageParser(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.article_depth = 0
         self.statuses: list[dict[str, str]] = []
-        self._details: dict[str, Any] | None = None
-        self._summary_depth = 0
+        self._status: dict[str, Any] | None = None
+        self._status_tag = ""
+        self._status_depth = 0
+        self._status_title_depth = 0
         self._table_depth = 0
         self._in_cell = False
         self._cell_tag = ""
@@ -52,12 +74,35 @@ class PageParser(HTMLParser):
             return
         if not self.article_depth:
             return
-        self.article_depth += 1
+        if tag not in HTML_VOID_ELEMENTS:
+            self.article_depth += 1
 
-        if tag == "details":
-            self._details = {"class": attributes.get("class", ""), "title": [], "body": []}
-        elif tag == "summary" and self._details is not None:
-            self._summary_depth = 1
+        classes = (attributes.get("class") or "").split()
+        is_status_container = tag == "details" or (
+            tag == "div" and "admonition" in classes
+        )
+        if is_status_container and self._status is None:
+            self._status = {
+                "class": attributes.get("class", ""),
+                "title": [],
+                "body": [],
+            }
+            self._status_tag = tag
+            self._status_depth = self.article_depth
+        elif (
+            self._status is not None
+            and not self._status_title_depth
+            and self.article_depth == self._status_depth + 1
+            and (
+                (self._status_tag == "details" and tag == "summary")
+                or (
+                    self._status_tag == "div"
+                    and tag == "p"
+                    and "admonition-title" in classes
+                )
+            )
+        ):
+            self._status_title_depth = self.article_depth
         elif tag == "table":
             self._table_depth += 1
         elif tag == "tr" and self._table_depth:
@@ -66,11 +111,19 @@ class PageParser(HTMLParser):
             self._in_cell = True
             self._cell_tag = tag
             self._cell_text = []
-        elif tag in {"p", "br", "li"} and self._details is not None and not self._summary_depth:
-            self._details["body"].append(" ")
+            if self._status is not None and not self._status_title_depth:
+                self._status["body"].append(" ")
+        elif (
+            tag in {"p", "br", "hr", "li", "summary"}
+            and self._status is not None
+            and not self._status_title_depth
+        ):
+            self._status["body"].append(" ")
 
     def handle_endtag(self, tag: str) -> None:
         if not self.article_depth:
+            return
+        if tag in HTML_VOID_ELEMENTS:
             return
 
         if tag in {"th", "td"} and self._in_cell and tag == self._cell_tag:
@@ -88,16 +141,27 @@ class PageParser(HTMLParser):
             self._row = []
         elif tag == "table" and self._table_depth:
             self._table_depth -= 1
-        elif tag == "summary" and self._summary_depth:
-            self._summary_depth = 0
-        elif tag == "details" and self._details is not None:
-            title = clean_text("".join(self._details["title"]))
-            body = clean_text("".join(self._details["body"]))
+        elif (
+            self._status_title_depth
+            and self.article_depth == self._status_title_depth
+            and tag in {"p", "summary"}
+        ):
+            self._status_title_depth = 0
+        elif (
+            self._status is not None
+            and tag == self._status_tag
+            and self.article_depth == self._status_depth
+        ):
+            title = clean_text("".join(self._status["title"]))
+            body = clean_text("".join(self._status["body"]))
             if title:
                 self.statuses.append(
-                    {"title": title, "body": body, "class": self._details["class"]}
+                    {"title": title, "body": body, "class": self._status["class"]}
                 )
-            self._details = None
+            self._status = None
+            self._status_tag = ""
+            self._status_depth = 0
+            self._status_title_depth = 0
 
         self.article_depth -= 1
 
@@ -106,9 +170,9 @@ class PageParser(HTMLParser):
             return
         if self._in_cell:
             self._cell_text.append(data)
-        if self._details is not None:
-            target = "title" if self._summary_depth else "body"
-            self._details[target].append(data)
+        if self._status is not None:
+            target = "title" if self._status_title_depth else "body"
+            self._status[target].append(data)
 
 
 def ssl_context() -> ssl.SSLContext:
@@ -139,6 +203,8 @@ def parse_pages(status_html: str, maintenance_html: str) -> dict[str, Any]:
     status_parser.feed(status_html)
     maintenance_parser = PageParser()
     maintenance_parser.feed(maintenance_html)
+    if not status_parser.statuses:
+        raise ValueError("Isambard status page yielded no service status cards.")
     return {
         "fetched_at": datetime.now(timezone.utc).isoformat(),
         "statuses": status_parser.statuses,

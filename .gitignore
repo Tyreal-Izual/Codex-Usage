@@ -1,4 +1,6 @@
 __pycache__/
 *.pyc
+.DS_Store
+.idea/
 isambard_status_snapshot.json
 usage-dashboard.json
