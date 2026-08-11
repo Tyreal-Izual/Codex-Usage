@@ -51,11 +51,9 @@
 python3 codex_claude_usage_web.py
 ```
 
-然后打开：
-
-```text
-http://127.0.0.1:8765
-```
+然后打开终端打印的私有访问链接。第一次访问会设置 `HttpOnly`、`SameSite=Strict` 的
+会话 Cookie，并重定向到 `http://127.0.0.1:8765`，从地址栏移除访问令牌。不要分享
+终端打印的链接；服务每次重启都会生成新令牌。
 
 终端里按 `Ctrl-C` 可以停止服务。
 
@@ -66,11 +64,7 @@ http://127.0.0.1:8765
 python3 codex_claude_usage_web.py --port 8766
 ```
 
-然后打开：
-
-```text
-http://127.0.0.1:8766
-```
+然后打开终端打印的、使用新端口的私有访问链接。
 
 ## 常用参数
 
@@ -98,8 +92,15 @@ python3 codex_claude_usage_web.py --quiet
 python3 codex_claude_usage_web.py --host 127.0.0.1
 ```
 
-默认 host 是 `127.0.0.1`。如果改成 `0.0.0.0`，局域网内其他设备也可能访问到
-这个页面，请谨慎使用。
+默认 host 是 `127.0.0.1`。服务会校验 Host，`/api/usage` 需要会话 Cookie 或
+`Authorization: Bearer <终端打印的令牌>`，并限制同时处理的请求与数据采集数量。
+通配监听需要显式指定允许的主机名，例如：
+
+```sh
+python3 codex_claude_usage_web.py --host 0.0.0.0 --allowed-host 192.0.2.10
+```
+
+这可能让局域网内其他设备访问到账户和用量信息，请谨慎使用。
 
 ## 页面控件
 
@@ -199,6 +200,10 @@ JSON 数据接口：
 GET /api/usage
 ```
 
+该接口需要浏览器会话 Cookie；命令行调用可复制启动链接中的令牌，并通过
+`Authorization: Bearer <令牌>` 请求。服务重启后旧令牌立即失效。强制刷新还需要
+使用 POST 并发送 `X-Codex-Usage-Action: force-refresh`，且每 30 秒最多启动一次。
+
 常用 query 参数：
 
 | 参数 | 作用 | 默认值 |
@@ -208,10 +213,10 @@ GET /api/usage
 | `days` | 本地每日数据窗口 | `30` |
 | `warn_days` | reset 过期提示窗口 | `7` |
 | `bucket_width` | API usage 的桶宽，可选 `1d`, `1h`, `1m` | `1d` |
-| `limit` | API usage 返回条数限制 | 空 |
+| `limit` | API usage 返回条数限制，最高 1440 | 空 |
 | `group_by` | API usage 分组字段，可重复或用逗号分隔 | 空 |
 | `no_costs` | 是否跳过 API costs 查询，可用 `1`, `true`, `yes` | `false` |
-| `isambard_force_refresh` | 是否跳过 Isambard 五分钟缓存，可用 `1`, `true`, `yes` | `false` |
+| `isambard_force_refresh` | 已认证 POST 是否跳过 Isambard 五分钟缓存，可用 `1`, `true`, `yes` | `false` |
 
 示例：
 

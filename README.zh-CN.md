@@ -91,11 +91,9 @@ Claude Code 用量以及 Isambard 服务信息。
 python3 codex_claude_usage_web.py
 ```
 
-然后打开：
-
-```text
-http://127.0.0.1:8765
-```
+打开终端打印的私有访问链接。第一次访问会写入带 `HttpOnly` 属性的浏览器会话 Cookie，然后
+重定向到 `http://127.0.0.1:8765`，因此地址栏中不会继续保留访问令牌。请勿分享终端
+打印的链接。
 
 在终端按 `Ctrl-C` 停止服务。常用参数：
 
@@ -106,8 +104,9 @@ python3 codex_claude_usage_web.py --quiet
 python3 codex_claude_usage_web.py --host 127.0.0.1 --port 8765
 ```
 
-默认监听地址有意限制为本机。改成 `0.0.0.0` 后，局域网内其他设备可能访问到账户
-和用量信息，请谨慎使用。
+默认监听地址有意限制为本机。服务会校验 Host，数据 API 要求每次启动时生成的访问
+凭据，并限制并发请求与数据采集数量。通配监听必须明确指定允许的主机名，例如
+`--host 0.0.0.0 --allowed-host 192.0.2.10`；这可能让其他设备访问仪表盘，请谨慎使用。
 
 ## Claude Code 设置
 
@@ -220,6 +219,10 @@ GET /healthz
 GET /api/usage
 ```
 
+该接口需要浏览器会话 Cookie；命令行客户端也可以把启动链接中的令牌作为
+`Authorization: Bearer <令牌>` 发送。服务重启后令牌会变化。强制刷新 Isambard
+需要使用 POST 并发送 `X-Codex-Usage-Action: force-refresh`，且每 30 秒最多启动一次。
+
 示例：
 
 ```text
@@ -233,10 +236,10 @@ http://127.0.0.1:8765/api/usage?report=codex-usage&top=10&days=30
 | `days` | 最近多少天的本地每日窗口 | `30` |
 | `warn_days` | Reset credit 即将过期的提示窗口 | `7` |
 | `bucket_width` | Admin API 桶宽：`1d`、`1h` 或 `1m` | `1d` |
-| `limit` | 可选的 Admin API bucket 数量限制 | 空 |
+| `limit` | 可选的 Admin API bucket 数量限制，最高 1440 | 空 |
 | `group_by` | 可选的 Admin API 分组字段，可重复或用逗号分隔 | 空 |
 | `no_costs` | 使用 `1`、`true` 或 `yes` 跳过 Admin API cost 请求 | `false` |
-| `isambard_force_refresh` | 使用 `1`、`true` 或 `yes` 跳过 Isambard 缓存 | `false` |
+| `isambard_force_refresh` | 已认证 POST 使用 `1`、`true` 或 `yes` 跳过 Isambard 缓存 | `false` |
 
 ## 独立采集器与原 Codex CLI
 

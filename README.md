@@ -105,11 +105,9 @@ From the repository directory, run:
 python3 codex_claude_usage_web.py
 ```
 
-Then open:
-
-```text
-http://127.0.0.1:8765
-```
+Open the private access URL printed in the terminal. The first request stores an
+`HttpOnly` browser session cookie and redirects to `http://127.0.0.1:8765`, so
+the access token is removed from the address bar. Do not share the printed URL.
 
 Stop the server with `Ctrl-C`. Common options are:
 
@@ -120,8 +118,12 @@ python3 codex_claude_usage_web.py --quiet
 python3 codex_claude_usage_web.py --host 127.0.0.1 --port 8765
 ```
 
-The default host is deliberately local-only. Changing it to `0.0.0.0` may
-expose account and usage information to other devices on the network.
+The default host is deliberately local-only. Requests are restricted to known
+Host headers, the data API requires the per-process access capability, and
+simultaneous requests and collectors are bounded. A wildcard bind must name an
+accepted hostname explicitly, for example
+`--host 0.0.0.0 --allowed-host 192.0.2.10`; it may expose the dashboard to other
+devices and should be used with care.
 
 ## Claude Code Setup
 
@@ -246,6 +248,12 @@ GET /healthz
 GET /api/usage
 ```
 
+The API requires the browser session cookie. Command-line clients can instead
+send the token from the startup URL as `Authorization: Bearer <token>`; the
+token changes whenever the server restarts. Forced Isambard refreshes use POST
+with `X-Codex-Usage-Action: force-refresh` and are limited to one start every
+30 seconds.
+
 Example:
 
 ```text
@@ -259,10 +267,10 @@ http://127.0.0.1:8765/api/usage?report=codex-usage&top=10&days=30
 | `days` | Recent local daily window | `30` |
 | `warn_days` | Reset-credit expiry warning window | `7` |
 | `bucket_width` | Admin API bucket width: `1d`, `1h`, or `1m` | `1d` |
-| `limit` | Optional Admin API bucket limit | empty |
+| `limit` | Optional Admin API bucket limit, capped at 1440 | empty |
 | `group_by` | Optional Admin API grouping field; repeat or comma-separate | empty |
 | `no_costs` | Skip the Admin API costs request with `1`, `true`, or `yes` | `false` |
-| `isambard_force_refresh` | Bypass the Isambard cache with `1`, `true`, or `yes` | `false` |
+| `isambard_force_refresh` | Authenticated POST bypass of the Isambard cache; accepts `1`, `true`, or `yes` | `false` |
 
 ## Standalone Collectors and Original CLI
 
