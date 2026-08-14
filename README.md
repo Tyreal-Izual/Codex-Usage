@@ -175,6 +175,14 @@ python3 claude_usage_statusline.py --uninstall
 > becomes stale. The dashboard displays snapshot age and stale state so an old
 > value is not mistaken for live account usage.
 
+The dashboard also runs the local `claude auth status` command and exposes only
+redacted state fields. A successful authenticated check shows a green **CLI
+Login · Logged in** chip. An explicit logged-out result shows a red re-login
+warning only after the rate-limit snapshot is stale or unavailable, with
+`claude auth login` as the recovery command. Missing binaries, timeouts, and
+unrecognised auth output remain neutral instead of producing a false green or
+red status.
+
 ### Optional background snapshot refresh on macOS
 
 `claude_usage_refresher.py` opens a temporary empty Claude Code session for this

@@ -623,6 +623,12 @@ INDEX_HTML = r"""<!doctype html>
       margin-bottom: 4px;
     }
 
+    .setup-callout--bad {
+      border-color: #713b3b;
+      background: #2b1919;
+      color: var(--bad);
+    }
+
     .setup-command {
       display: block;
       overflow-x: auto;
@@ -1210,6 +1216,11 @@ INDEX_HTML = r"""<!doctype html>
         claudeFiveHourHint: "Available before the Claude 5-hour limit is reached",
         claudeWeeklyHint: "Available before the Claude weekly limit is reached",
         claudeSnapshotAge: "Snapshot Age",
+        claudeLogin: "CLI Login",
+        claudeLoginHealthy: "Logged in",
+        claudeLoginRequired: "Re-login required",
+        claudeLoginWarningTitle: "Claude Code CLI login has expired",
+        claudeLoginWarningHint: "Run this command in Terminal, then wait for the next background refresh:",
         claudeSnapshotState: "Snapshot State",
         claudeFresh: "Fresh",
         claudeStale: "Stale",
@@ -1365,6 +1376,11 @@ INDEX_HTML = r"""<!doctype html>
         claudeFiveHourHint: "距离 Claude 5 小时限制前仍可使用的比例",
         claudeWeeklyHint: "距离 Claude Weekly 限制前仍可使用的比例",
         claudeSnapshotAge: "快照时长",
+        claudeLogin: "CLI 登录",
+        claudeLoginHealthy: "已登录",
+        claudeLoginRequired: "需要重新验证",
+        claudeLoginWarningTitle: "Claude Code CLI 登录已失效",
+        claudeLoginWarningHint: "请在 Terminal 运行以下命令，完成验证后等待下一次后台刷新：",
         claudeSnapshotState: "快照状态",
         claudeFresh: "新鲜",
         claudeStale: "已过期",
@@ -1987,6 +2003,9 @@ INDEX_HTML = r"""<!doctype html>
       const local = claude.local_usage || {};
       const fiveHour = rate.five_hour || null;
       const sevenDay = rate.seven_day || null;
+      const authStatus = rate.auth_status || {};
+      const loginHealthy = authStatus.indicator === "logged_in";
+      const requiresLogin = authStatus.indicator === "requires_login";
       const captureReady = rate.capture_ready ?? rate.capture_installed;
       const captureValue = rate.capture_method === "usage_command"
         ? t("claudeUsageCommand")
@@ -2006,6 +2025,13 @@ INDEX_HTML = r"""<!doctype html>
           tone: captureReady ? "good" : "warn"
         }
       ];
+      if (loginHealthy || requiresLogin) {
+        headerExtras.splice(1, 0, {
+          label: t("claudeLogin"),
+          value: t(requiresLogin ? "claudeLoginRequired" : "claudeLoginHealthy"),
+          tone: requiresLogin ? "bad" : "good"
+        });
+      }
       const planValue = rate.plan_type || rate.plan;
       if (planValue !== undefined && planValue !== null && planValue !== "") {
         headerExtras.push({ label: t("plan"), value: planValue });
@@ -2019,6 +2045,12 @@ INDEX_HTML = r"""<!doctype html>
           <span>${esc(t("claudeSetupHint"))}</span>
           <code class="setup-command mono">${esc(rate.install_command || "python3 claude_usage_statusline.py --install")}</code>
         </div>`;
+      const loginWarning = requiresLogin ? `
+        <div class="setup-callout setup-callout--bad">
+          <strong>${esc(t("claudeLoginWarningTitle"))}</strong>
+          <span>${esc(t("claudeLoginWarningHint"))}</span>
+          <code class="setup-command mono">claude auth login</code>
+        </div>` : "";
       const fiveHourReset = `${t("resetsIn")} ${fmtDurationSeconds(fiveHour?.reset_after_seconds)}`;
       const sevenDayReset = `${t("resetsIn")} ${fmtDurationSeconds(sevenDay?.reset_after_seconds)}`;
       const bars = `<div class="bars">${leftBar(t("claudeFiveHour"), fiveHour?.used_percentage, t("claudeFiveHourHint"), fiveHourReset)}${leftBar(t("claudeWeekly"), sevenDay?.used_percentage, t("claudeWeeklyHint"), sevenDayReset)}</div>`;
@@ -2070,7 +2102,7 @@ INDEX_HTML = r"""<!doctype html>
         : [];
 
       return [
-        panel(t("claudeRateLimits"), t("claudeRateSubtitle"), bars + setup, true, "claude-rate", headerExtras),
+        panel(t("claudeRateLimits"), t("claudeRateSubtitle"), bars + loginWarning + setup, true, "claude-rate", headerExtras),
         panel(t("claudeLocalTokens"), t("claudeLocalSubtitle"), localMeta + table([t("field"), t("total")], tokenRows, [1]), false, "claude-totals"),
         panel(t("claudeModels"), t("claudeModelsSubtitle"), modelTokenStack(models) + table([t("model"), t("requests"), t("total"), t("share")], modelRows, [1, 2, 3]) + detailsLink, false, "claude-models", modelHeaderExtras),
         panel(t("claudeDailyUsage"), `${daily.length} ${t("dayWindow")}`, dailyHeatmap(daily), false, "claude-daily"),

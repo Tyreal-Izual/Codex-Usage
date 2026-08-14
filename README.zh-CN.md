@@ -152,6 +152,12 @@ python3 claude_usage_statusline.py --uninstall
 > 却不调用自定义 statusLine。此时 token 图表会继续更新，但 5 小时/7 天限额快照会
 > 逐渐过期。页面会显示 snapshot age 和 stale 状态，避免把旧数据误认为账户实时用量。
 
+页面还会执行本地 `claude auth status`，并且只返回经过脱敏的状态字段。认证检查明确成功
+时，标题会显示绿色的 **CLI 登录 · 已登录**；认证检查明确返回未登录，并且限额快照已经
+过期或不可用时，页面才显示红色的重新验证提示，并给出 `claude auth login` 恢复命令。
+如果找不到 Claude 可执行文件、检查超时或认证输出无法识别，页面保持中性，不会显示
+错误的绿色或红色结论。
+
 ### macOS 可选后台快照刷新
 
 `claude_usage_refresher.py` 会在本仓库打开一个临时空白 Claude Code 会话，执行本地

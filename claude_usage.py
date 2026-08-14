@@ -17,6 +17,8 @@ import json
 import math
 import os
 import shlex
+import shutil
+import subprocess
 import sys
 import threading
 from collections import Counter, defaultdict
@@ -33,6 +35,7 @@ TOKEN_FIELDS = (
 )
 TOTAL_FIELD = "total_tokens"
 DEFAULT_STALE_SECONDS = 15 * 60
+CLAUDE_AUTH_TIMEOUT_SECONDS = 5
 
 
 def resolve_claude_home() -> Path:
@@ -425,6 +428,120 @@ def statusline_is_installed(claude_home: Path) -> bool:
     return str(statusline_script_path()) in command
 
 
+def claude_binary_path() -> str | None:
+    configured = os.environ.get("CLAUDE_BIN")
+    candidates = [
+        configured,
+        shutil.which("claude"),
+        str(Path.home() / ".local" / "bin" / "claude"),
+        "/opt/homebrew/bin/claude",
+        "/usr/local/bin/claude",
+    ]
+    for value in candidates:
+        if not value:
+            continue
+        candidate = Path(value).expanduser()
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
+    return None
+
+
+def claude_auth_status() -> dict[str, Any]:
+    """Return a small, redacted view of ``claude auth status``."""
+
+    binary = claude_binary_path()
+    if binary is None:
+        return {
+            "checked": False,
+            "logged_in": None,
+            "requires_login": False,
+            "reason": "claude_not_found",
+        }
+    try:
+        result = subprocess.run(
+            [binary, "auth", "status"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=CLAUDE_AUTH_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        return {
+            "checked": False,
+            "logged_in": None,
+            "requires_login": False,
+            "reason": "auth_status_timeout",
+        }
+    except OSError:
+        return {
+            "checked": False,
+            "logged_in": None,
+            "requires_login": False,
+            "reason": "auth_status_unavailable",
+        }
+
+    try:
+        value = json.loads(result.stdout)
+    except (TypeError, json.JSONDecodeError):
+        return {
+            "checked": False,
+            "logged_in": None,
+            "requires_login": False,
+            "reason": "auth_status_invalid",
+        }
+    if not isinstance(value, dict) or not isinstance(value.get("loggedIn"), bool):
+        return {
+            "checked": False,
+            "logged_in": None,
+            "requires_login": False,
+            "reason": "auth_status_invalid",
+        }
+
+    logged_in = value["loggedIn"]
+    status: dict[str, Any] = {
+        "checked": True,
+        "logged_in": logged_in,
+        "requires_login": not logged_in,
+    }
+    for source, target in (
+        ("authMethod", "auth_method"),
+        ("subscriptionType", "subscription_type"),
+        ("apiProvider", "api_provider"),
+    ):
+        item = value.get(source)
+        if isinstance(item, str) and item.strip():
+            status[target] = item.strip()
+    return status
+
+
+def claude_login_indicator(
+    auth_status: dict[str, Any],
+    *,
+    rate_available: bool,
+    rate_stale: bool | None,
+) -> str | None:
+    """Choose a login chip only when the auth check is authoritative."""
+
+    if auth_status.get("checked") is not True:
+        return None
+    if auth_status.get("logged_in") is True:
+        return "logged_in"
+    if auth_status.get("logged_in") is False and (rate_stale is True or not rate_available):
+        return "requires_login"
+    return None
+
+
+def add_login_indicator(rate: dict[str, Any]) -> dict[str, Any]:
+    auth_status = rate.get("auth_status")
+    if isinstance(auth_status, dict):
+        auth_status["indicator"] = claude_login_indicator(
+            auth_status,
+            rate_available=rate.get("available") is True,
+            rate_stale=rate.get("stale") if isinstance(rate.get("stale"), bool) else None,
+        )
+    return rate
+
+
 def normalise_window(value: Any, now_epoch: float) -> dict[str, Any] | None:
     if not isinstance(value, dict):
         return None
@@ -448,6 +565,7 @@ def collect_rate_limits(claude_home: Path, snapshot_path: Path) -> dict[str, Any
     installed = statusline_is_installed(claude_home)
     base: dict[str, Any] = {
         "available": False,
+        "auth_status": claude_auth_status(),
         "capture_installed": installed,
         "capture_ready": installed,
         "capture_method": "statusline" if installed else None,
@@ -457,16 +575,16 @@ def collect_rate_limits(claude_home: Path, snapshot_path: Path) -> dict[str, Any
     }
     if not snapshot_path.exists():
         base["reason"] = "snapshot_not_found"
-        return base
+        return add_login_indicator(base)
     try:
         snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         base["reason"] = "snapshot_invalid"
         base["error"] = f"{type(exc).__name__}: {exc}"
-        return base
+        return add_login_indicator(base)
     if not isinstance(snapshot, dict):
         base["reason"] = "snapshot_invalid"
-        return base
+        return add_login_indicator(base)
 
     now_epoch = datetime.now(timezone.utc).timestamp()
     captured_epoch = finite_number(snapshot.get("captured_at_epoch"))
@@ -510,7 +628,7 @@ def collect_rate_limits(claude_home: Path, snapshot_path: Path) -> dict[str, Any
         base["limit_reached"] = limit_reached
     if not base["available"]:
         base["reason"] = "rate_limits_missing"
-    return base
+    return add_login_indicator(base)
 
 
 def collect_usage(

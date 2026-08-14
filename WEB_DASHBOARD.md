@@ -137,7 +137,7 @@ http://127.0.0.1:8765/isambard-maintenance
 | 区域 | 说明 |
 | --- | --- |
 | `Codex Online Rate Limits` | 固定显示在线 primary / weekly 两个位置；可用窗口显示剩余百分比和 reset 时间，不可用窗口以 `-` 占位，同时显示账号状态 |
-| `Claude Code Rate Limits` | statusLine 快照中的 5 小时/7 天剩余百分比、重置时间、快照年龄和安装状态 |
+| `Claude Code Rate Limits` | statusLine 快照中的 5 小时/7 天剩余百分比、重置时间、快照年龄、CLI 登录状态和安装状态 |
 | `Claude Code Local Token Totals` | 去重后的输入、输出、缓存创建、缓存读取和总 token |
 | `Claude Code Models` / `Claude Code Projects` / `Claude Code Daily Usage` / `Claude Code Top Sessions` | Claude 本地 JSONL 的模型、项目、每日和 session 排行 |
 | `Isambard Service Status` | 公开 Isambard 服务状态；标题行显示缓存时长和计划维护入口，入口会打开二级详情页 |
@@ -177,6 +177,11 @@ python3 claude_usage_refresher.py --uninstall
 
 这是 Claude Code 客户端自动化，不是官方后台 API。Mac 睡眠或用户退出登录期间不会
 定时刷新；Claude Code 的启动行为或 `/usage` 页面格式变化也可能影响该功能。
+
+页面通过本地 `claude auth status` 检查 CLI 登录状态，只保留 `loggedIn`、认证方式和
+订阅类型等非身份字段，不返回邮箱或组织 ID。检查明确成功且已登录时显示绿色状态；
+明确未登录且快照已经过期或不可用时显示红色提示与 `claude auth login` 命令。检查失败
+或输出格式无法识别时不显示登录结论，以免把旧快照或检测故障误报为“已登录”。
 
 ## 本地接口
 
