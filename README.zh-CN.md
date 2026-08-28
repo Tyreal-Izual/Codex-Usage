@@ -172,7 +172,7 @@ prompt。刷新器不会恢复已有对话，也不会保存终端输出，并�
 python3 claude_usage_refresher.py --once --force
 ```
 
-安装用户级 LaunchAgent，每 10 分钟检查一次：
+安装支持 reset 感知的用户级 LaunchAgent：
 
 ```sh
 python3 claude_usage_refresher.py --install
@@ -185,12 +185,16 @@ python3 claude_usage_refresher.py --status
 python3 claude_usage_refresher.py --uninstall
 ```
 
-定时任务会跳过 8 分钟内刚更新的快照，给 Claude Code 5 秒启动时间，让 `/usage`
-保持打开 30 秒后解析并退出，然后确认快照已写入。它会防止重复运行，并清理卡住的
-Claude 进程。日志位于 `~/.claude/usage-refresh*.log`。任务只会在 Mac 已唤醒且用户
-已登录时运行；如果移动了仓库或 Claude 可执行文件，需要重新执行 `--install`。这是
-Claude Code 客户端自动化，并非 Anthropic 提供的后台用量 API，因此未来的 Claude
-Code 版本可能需要相应调整。
+LaunchAgent 每 60 秒只读取一次本地快照，并不会每分钟都启动 Claude Code；普通完整
+刷新仍约每 10 分钟一次。任一已保存的 reset 时间到达后，任务会等待 30 秒让账户状态
+稳定，然后优先执行一次刷新，因此页面停留在 `Resets in now` 时通常会在 30–90 秒内
+恢复。`usage-dashboard-refresh-state.json` 只记录尝试时间、reset 时间戳和退出码；
+reset 触发的刷新失败后会冷却 5 分钟，避免每分钟重复启动 Claude。原有进程锁继续防止
+任务重叠，并清理卡住的 Claude 进程。日志仍位于 `~/.claude/usage-refresh*.log`。
+
+任务只会在 Mac 已唤醒且用户已登录时运行。从旧版 10 分钟调度升级、移动仓库或移动
+Claude 可执行文件后，需要重新执行 `--install`。这是 Claude Code 客户端自动化，并非
+Anthropic 提供的后台用量 API，因此未来的 Claude Code 版本可能需要相应调整。
 
 ## 页面与数据来源
 

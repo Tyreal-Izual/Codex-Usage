@@ -199,7 +199,7 @@ Test one refresh first:
 python3 claude_usage_refresher.py --once --force
 ```
 
-Install a per-user LaunchAgent that checks every ten minutes:
+Install a per-user LaunchAgent with reset-aware refresh:
 
 ```sh
 python3 claude_usage_refresher.py --install
@@ -212,14 +212,22 @@ Remove it with:
 python3 claude_usage_refresher.py --uninstall
 ```
 
-The scheduled run skips a snapshot newer than eight minutes, gives Claude Code
-five seconds to start, and keeps `/usage` open for 30 seconds before parsing
-and exiting. It verifies that the snapshot was written, prevents overlapping
-runs, and terminates a stuck Claude process. Logs are stored under
-`~/.claude/usage-refresh*.log`. The job runs only while the Mac is awake and
-logged in. Re-run `--install` after moving this repository or the Claude
-executable. This is client automation rather than an Anthropic background-usage
-API, so a future Claude Code release may require adjustments.
+The LaunchAgent performs a lightweight local snapshot check every 60 seconds;
+it does not start Claude Code on every probe. Normal full refreshes remain
+about ten minutes apart. When either stored reset deadline passes, the agent
+waits 30 seconds for account state to settle and then prioritises one refresh,
+so a dashboard stuck at `Resets in now` normally clears within 30–90 seconds.
+A small `usage-dashboard-refresh-state.json` file records only attempt timing,
+the reset timestamp, and the exit code. Failed reset-triggered attempts cool
+down for five minutes instead of launching Claude every minute. The existing
+process lock prevents overlap, and a stuck Claude process is terminated. Logs
+remain under `~/.claude/usage-refresh*.log`.
+
+The job runs only while the Mac is awake and logged in. Re-run `--install`
+after upgrading from the older ten-minute scheduler, moving this repository,
+or moving the Claude executable. This is client automation rather than an
+Anthropic background-usage API, so a future Claude Code release may require
+adjustments.
 
 ## Dashboard Views and Data Sources
 

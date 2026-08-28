@@ -7,9 +7,10 @@ runs Claude Code's local ``/usage`` command, parses only its limit percentages
 and reset times, and writes the same sanitised snapshot format without
 submitting a prompt to the model.
 
-The optional launchd integration runs the same one-shot refresh every ten
-minutes. It is intentionally separate from the Codex collectors and web
-server.
+The optional launchd integration probes the local snapshot once per minute,
+runs a normal refresh about every ten minutes, and can refresh shortly after a
+recorded reset deadline. It is intentionally separate from the Codex
+collectors and web server.
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ from __future__ import annotations
 import argparse
 import fcntl
 import json
+import math
 import os
 import plistlib
 import re
@@ -28,15 +30,17 @@ import tempfile
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import BinaryIO
+from typing import Any, BinaryIO
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import claude_usage_statusline
 
 
 LAUNCH_AGENT_LABEL = "com.tyreal.codex-usage.claude-refresh"
-DEFAULT_INTERVAL_SECONDS = 10 * 60
-DEFAULT_MIN_AGE_SECONDS = 8 * 60
+DEFAULT_INTERVAL_SECONDS = 60
+DEFAULT_MIN_AGE_SECONDS = 10 * 60
+DEFAULT_RESET_GRACE_SECONDS = 30
+DEFAULT_RESET_RETRY_SECONDS = 5 * 60
 DEFAULT_STARTUP_DELAY_SECONDS = 5
 DEFAULT_TIMEOUT_SECONDS = 30
 DEFAULT_EXIT_GRACE_SECONDS = 8
@@ -115,6 +119,76 @@ def snapshot_age_seconds(path: Path) -> float | None:
     except FileNotFoundError:
         return None
     return max(0.0, time.time() - modified_at)
+
+
+def refresh_state_path(snapshot: Path) -> Path:
+    return snapshot.with_name(f"{snapshot.stem}-refresh-state.json")
+
+
+def finite_epoch(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    number = float(value)
+    return number if math.isfinite(number) and number >= 0 else None
+
+
+def reset_due_epoch(
+    snapshot: dict[str, object],
+    *,
+    now_epoch: float,
+    grace_seconds: int,
+) -> int | None:
+    limits = snapshot.get("rate_limits")
+    if not isinstance(limits, dict):
+        return None
+    due: list[int] = []
+    for key in ("five_hour", "seven_day"):
+        window = limits.get(key)
+        if not isinstance(window, dict):
+            continue
+        resets_at = finite_epoch(window.get("resets_at"))
+        if resets_at is not None and resets_at + grace_seconds <= now_epoch:
+            due.append(int(resets_at))
+    return min(due) if due else None
+
+
+def refresh_decision(
+    *,
+    force: bool,
+    snapshot_age: float | None,
+    due_reset: int | None,
+    state: dict[str, object],
+    now_epoch: float,
+    min_age_seconds: int,
+    reset_retry_seconds: int,
+) -> str | None:
+    if force:
+        return "force"
+    if due_reset is not None:
+        attempted_reset = finite_epoch(state.get("reset_epoch"))
+        attempted_at = finite_epoch(state.get("last_attempt_at_epoch"))
+        same_reset = attempted_reset is not None and int(attempted_reset) == due_reset
+        cooling_down = (
+            same_reset
+            and attempted_at is not None
+            and now_epoch - attempted_at < reset_retry_seconds
+        )
+        return None if cooling_down else "reset_due"
+    if snapshot_age is None or snapshot_age >= min_age_seconds:
+        return "regular"
+    return None
+
+
+def previous_refresh_state(path: Path) -> dict[str, object]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def write_refresh_state(path: Path, state: dict[str, object]) -> None:
+    claude_usage_statusline.atomic_write_json(path, state)
 
 
 def strip_terminal_codes(value: bytes) -> str:
@@ -347,8 +421,11 @@ def run_once(
     *,
     project: Path,
     snapshot: Path,
+    state_path: Path,
     claude_binary: Path,
     min_age_seconds: int,
+    reset_grace_seconds: int,
+    reset_retry_seconds: int,
     startup_delay_seconds: int,
     timeout_seconds: int,
     exit_grace_seconds: int,
@@ -365,17 +442,56 @@ def run_once(
         return 0
 
     try:
+        now_epoch = time.time()
         age = snapshot_age_seconds(snapshot)
-        if not force and age is not None and age < min_age_seconds:
+        snapshot_value = previous_snapshot(snapshot)
+        due_reset = reset_due_epoch(
+            snapshot_value,
+            now_epoch=now_epoch,
+            grace_seconds=reset_grace_seconds,
+        )
+        refresh_state = previous_refresh_state(state_path)
+        decision = refresh_decision(
+            force=force,
+            snapshot_age=age,
+            due_reset=due_reset,
+            state=refresh_state,
+            now_epoch=now_epoch,
+            min_age_seconds=min_age_seconds,
+            reset_retry_seconds=reset_retry_seconds,
+        )
+        if decision is None:
             if not quiet:
-                print(f"Snapshot is {age:.0f}s old; no refresh is needed.")
+                if due_reset is not None:
+                    print("Reset-aware refresh is cooling down; no refresh is needed.")
+                elif age is not None:
+                    print(f"Snapshot is {age:.0f}s old; no refresh is needed.")
             return 0
+
+        refresh_state.update(
+            {
+                "schema_version": 1,
+                "last_attempt_at_epoch": now_epoch,
+                "last_attempt_reason": decision,
+            }
+        )
+        if due_reset is not None:
+            refresh_state["reset_epoch"] = due_reset
+        try:
+            write_refresh_state(state_path, refresh_state)
+        except OSError as exc:
+            print(f"Could not write refresh state {state_path}: {exc}", file=sys.stderr)
 
         previous_signature = snapshot_signature(snapshot)
         started_at = time.monotonic()
         try:
             expect_binary = resolve_expect_binary()
         except FileNotFoundError as exc:
+            refresh_state["last_exit_code"] = 2
+            try:
+                write_refresh_state(state_path, refresh_state)
+            except OSError:
+                pass
             print(str(exc), file=sys.stderr)
             return 2
 
@@ -416,8 +532,18 @@ def run_once(
             parse_error = str(exc)
         updated = snapshot_signature(snapshot) != previous_signature
         if updated:
+            refresh_state.update(
+                {
+                    "last_exit_code": 0,
+                    "last_success_at_epoch": time.time(),
+                }
+            )
+            try:
+                write_refresh_state(state_path, refresh_state)
+            except OSError as exc:
+                print(f"Could not write refresh state {state_path}: {exc}", file=sys.stderr)
             if not quiet:
-                print(f"Claude usage snapshot refreshed in {elapsed:.1f}s.")
+                print(f"Claude usage snapshot refreshed ({decision}) in {elapsed:.1f}s.")
             return 0
 
         diagnostic = ""
@@ -431,6 +557,11 @@ def run_once(
             f"Claude Code exited or timed out after {elapsed:.1f}s without updating {snapshot}.",
             file=sys.stderr,
         )
+        refresh_state["last_exit_code"] = 1
+        try:
+            write_refresh_state(state_path, refresh_state)
+        except OSError as exc:
+            print(f"Could not write refresh state {state_path}: {exc}", file=sys.stderr)
         return 1
     finally:
         fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
@@ -479,9 +610,12 @@ def install_launch_agent(
     *,
     project: Path,
     snapshot: Path,
+    state_path: Path,
     claude_binary: Path,
     interval_seconds: int,
     min_age_seconds: int,
+    reset_grace_seconds: int,
+    reset_retry_seconds: int,
     startup_delay_seconds: int,
     timeout_seconds: int,
     exit_grace_seconds: int,
@@ -503,10 +637,16 @@ def install_launch_agent(
         str(project),
         "--snapshot",
         str(snapshot),
+        "--state",
+        str(state_path),
         "--claude-bin",
         str(claude_binary),
         "--min-age",
         str(min_age_seconds),
+        "--reset-grace",
+        str(reset_grace_seconds),
+        "--reset-retry",
+        str(reset_retry_seconds),
         "--startup-delay",
         str(startup_delay_seconds),
         "--timeout",
@@ -560,9 +700,13 @@ def install_launch_agent(
     launchctl("enable", f"{domain}/{LAUNCH_AGENT_LABEL}")
 
     print(f"Installed and loaded: {agent_path}")
-    print(f"Schedule: every {interval_seconds} seconds")
+    print(f"Probe schedule: every {interval_seconds} seconds")
+    print(f"Regular refresh age: {min_age_seconds} seconds")
+    print(f"Reset grace: {reset_grace_seconds} seconds")
+    print(f"Reset retry cooldown: {reset_retry_seconds} seconds")
     print(f"Project: {project}")
     print(f"Snapshot: {snapshot}")
+    print(f"Refresh state: {state_path}")
     return 0
 
 
@@ -582,7 +726,7 @@ def uninstall_launch_agent() -> int:
     return 0
 
 
-def show_status(snapshot: Path) -> int:
+def show_status(snapshot: Path, state_path: Path) -> int:
     agent_path = launch_agent_path()
     loaded = False
     if sys.platform == "darwin":
@@ -600,13 +744,17 @@ def show_status(snapshot: Path) -> int:
 
     age = snapshot_age_seconds(snapshot)
     age_text = "missing" if age is None else f"{age:.0f}s"
+    refresh_state = previous_refresh_state(state_path)
     print(f"StatusLine capture installed: {'yes' if capture_is_installed() else 'no'}")
     print(f"LaunchAgent file: {agent_path}")
     print(f"LaunchAgent installed: {'yes' if agent_path.exists() else 'no'}")
     print(f"LaunchAgent loaded: {'yes' if loaded else 'no'}")
-    print(f"Interval seconds: {interval}")
+    print(f"Probe interval seconds: {interval}")
     print(f"Snapshot: {snapshot}")
     print(f"Snapshot age: {age_text}")
+    print(f"Refresh state: {state_path}")
+    print(f"Last attempt reason: {refresh_state.get('last_attempt_reason', '-')}")
+    print(f"Last exit code: {refresh_state.get('last_exit_code', '-')}")
     return 0
 
 
@@ -635,18 +783,42 @@ def build_parser() -> argparse.ArgumentParser:
     action.add_argument("--status", action="store_true", help="Show capture and LaunchAgent status.")
     parser.add_argument("--project-dir", type=Path, default=project_directory())
     parser.add_argument("--snapshot", type=Path, default=claude_usage_statusline.snapshot_path())
+    parser.add_argument(
+        "--state",
+        type=Path,
+        default=None,
+        help="Refresh-state JSON path. Defaults beside the usage snapshot.",
+    )
     parser.add_argument("--claude-bin", type=Path, default=None)
     parser.add_argument(
         "--interval",
         type=positive_integer,
         default=DEFAULT_INTERVAL_SECONDS,
-        help=f"LaunchAgent interval in seconds. Default: {DEFAULT_INTERVAL_SECONDS}.",
+        help=f"Lightweight LaunchAgent probe interval. Default: {DEFAULT_INTERVAL_SECONDS}.",
     )
     parser.add_argument(
         "--min-age",
         type=non_negative_integer,
         default=DEFAULT_MIN_AGE_SECONDS,
-        help=f"Skip snapshots newer than this many seconds. Default: {DEFAULT_MIN_AGE_SECONDS}.",
+        help=f"Regular refresh age in seconds. Default: {DEFAULT_MIN_AGE_SECONDS}.",
+    )
+    parser.add_argument(
+        "--reset-grace",
+        type=non_negative_integer,
+        default=DEFAULT_RESET_GRACE_SECONDS,
+        help=(
+            "Seconds after a recorded reset before refreshing. "
+            f"Default: {DEFAULT_RESET_GRACE_SECONDS}."
+        ),
+    )
+    parser.add_argument(
+        "--reset-retry",
+        type=positive_integer,
+        default=DEFAULT_RESET_RETRY_SECONDS,
+        help=(
+            "Cooldown after a reset-triggered attempt. "
+            f"Default: {DEFAULT_RESET_RETRY_SECONDS}."
+        ),
     )
     parser.add_argument(
         "--startup-delay",
@@ -684,10 +856,15 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     args = build_parser().parse_args()
     snapshot = args.snapshot.expanduser().resolve()
+    state_path = (
+        args.state.expanduser().resolve()
+        if args.state is not None
+        else refresh_state_path(snapshot)
+    )
     project = args.project_dir.expanduser().resolve()
 
     if args.status:
-        return show_status(snapshot)
+        return show_status(snapshot, state_path)
     if args.uninstall:
         return uninstall_launch_agent()
 
@@ -701,9 +878,12 @@ def main() -> int:
         return install_launch_agent(
             project=project,
             snapshot=snapshot,
+            state_path=state_path,
             claude_binary=claude_binary,
             interval_seconds=args.interval,
             min_age_seconds=args.min_age,
+            reset_grace_seconds=args.reset_grace,
+            reset_retry_seconds=args.reset_retry,
             startup_delay_seconds=args.startup_delay,
             timeout_seconds=args.timeout,
             exit_grace_seconds=args.exit_grace,
@@ -711,8 +891,11 @@ def main() -> int:
     return run_once(
         project=project,
         snapshot=snapshot,
+        state_path=state_path,
         claude_binary=claude_binary,
         min_age_seconds=args.min_age,
+        reset_grace_seconds=args.reset_grace,
+        reset_retry_seconds=args.reset_retry,
         startup_delay_seconds=args.startup_delay,
         timeout_seconds=args.timeout,
         exit_grace_seconds=args.exit_grace,

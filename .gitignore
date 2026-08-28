@@ -4,3 +4,4 @@ __pycache__/
 .idea/
 isambard_status_snapshot.json
 usage-dashboard.json
+usage-dashboard-refresh-state.json
