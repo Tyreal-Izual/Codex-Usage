@@ -218,10 +218,13 @@ about ten minutes apart. When either stored reset deadline passes, the agent
 waits 30 seconds for account state to settle and then prioritises one refresh,
 so a dashboard stuck at `Resets in now` normally clears within 30–90 seconds.
 A small `usage-dashboard-refresh-state.json` file records only attempt timing,
-the reset timestamp, and the exit code. Failed reset-triggered attempts cool
-down for five minutes instead of launching Claude every minute. The existing
-process lock prevents overlap, and a stuck Claude process is terminated. Logs
-remain under `~/.claude/usage-refresh*.log`.
+the reset timestamp, exit state, and consecutive-failure count. Any failed or
+interrupted full refresh backs off for 5, 10, 20, and then at most 40 minutes,
+so a broken `/usage` parser cannot launch Claude every minute. Available
+subscription windows are parsed independently; one missing or invalid window
+does not discard a valid one. Percentages outside 0–100 are rejected rather
+than clamped. The existing process lock prevents overlap, and a stuck Claude
+process is terminated. Logs remain under `~/.claude/usage-refresh*.log`.
 
 The job runs only while the Mac is awake and logged in. Re-run `--install`
 after upgrading from the older ten-minute scheduler, moving this repository,

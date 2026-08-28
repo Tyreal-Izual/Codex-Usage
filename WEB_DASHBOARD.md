@@ -164,15 +164,17 @@ python3 claude_usage_refresher.py --status
 
 LaunchAgent 默认每 60 秒做一次轻量本地检查，但普通完整刷新仍约每 600 秒一次；轻量
 检查不会启动 Claude。任一快照 reset 时间到达 30 秒后，脚本会绕过普通快照年龄限制，
-优先刷新一次。失败后使用 300 秒冷却，并在
-`usage-dashboard-refresh-state.json` 中保存非敏感的尝试时间、reset 时间戳与退出码，
-避免同一个 reset 每分钟重复启动 Claude。
+优先刷新一次。任何完整刷新失败或异常中断后，都会按 300、600、1200、最多 2400 秒
+指数退避，并在 `usage-dashboard-refresh-state.json` 中保存非敏感的尝试时间、reset
+时间戳、退出状态与连续失败次数，避免故障期间每分钟重复启动 Claude。
 
 需要完整刷新时，脚本通过伪终端在当前仓库打开临时空白 Claude 会话，等待 5 秒后执行
 Claude Code 的本地 `/usage` 命令。保持 30 秒后，脚本只解析 5 小时/weekly 百分比与
 reset 时间，写入 `usage-dashboard.json`，再发送 `Ctrl-D` 退出。`/usage` 不向模型提交
 prompt，脚本不会恢复已有会话或保存伪终端内容。脚本使用进程锁防止重叠，并在正常退出
-失败时终止残留进程。该刷新方式可以独立于 statusLine 桥接使用。
+失败时终止残留进程。5 小时与 weekly 窗口会独立解析；单个窗口缺失或百分比无效不会
+丢弃另一个有效窗口，越界百分比也不会被钳成 100%。该刷新方式可以独立于 statusLine
+桥接使用。
 
 卸载命令：
 

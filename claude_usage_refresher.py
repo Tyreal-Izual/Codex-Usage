@@ -40,7 +40,8 @@ LAUNCH_AGENT_LABEL = "com.tyreal.codex-usage.claude-refresh"
 DEFAULT_INTERVAL_SECONDS = 60
 DEFAULT_MIN_AGE_SECONDS = 10 * 60
 DEFAULT_RESET_GRACE_SECONDS = 30
-DEFAULT_RESET_RETRY_SECONDS = 5 * 60
+DEFAULT_RETRY_BASE_SECONDS = 5 * 60
+MAX_RETRY_MULTIPLIER = 8
 DEFAULT_STARTUP_DELAY_SECONDS = 5
 DEFAULT_TIMEOUT_SECONDS = 30
 DEFAULT_EXIT_GRACE_SECONDS = 8
@@ -72,12 +73,14 @@ exit 0
 
 ANSI_CSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 ANSI_OSC_RE = re.compile(r"\x1b\][^\x07]*(?:\x07|\x1b\\)")
+PERCENT_USED_PATTERN = r"(?<!\d)(\d{1,3}(?:\.\d+)?)%used"
 SESSION_USAGE_RE = re.compile(
-    r"Currentsession.*?(\d+(?:\.\d+)?)%used.*?Resets(.*?)(?=Currentweek)",
+    r"Currentsession(?:(?!Currentweek).)*?" + PERCENT_USED_PATTERN
+    + r"(?:(?!Currentweek).)*?Resets(.*?)(?=Currentweek|What.?scontributing|$)",
     re.IGNORECASE | re.DOTALL,
 )
 WEEKLY_USAGE_RE = re.compile(
-    r"Currentweek(?:\(allmodels\))?.*?(\d+(?:\.\d+)?)%used.*?Resets"
+    r"Currentweek(?:\(allmodels\))?.*?" + PERCENT_USED_PATTERN + r".*?Resets"
     r"(.*?)(?=(?:\+\d+(?:\.\d+)?%weekly|What.?scontributing|$))",
     re.IGNORECASE | re.DOTALL,
 )
@@ -132,6 +135,28 @@ def finite_epoch(value: Any) -> float | None:
     return number if math.isfinite(number) and number >= 0 else None
 
 
+def consecutive_failure_count(state: dict[str, object]) -> int:
+    value = state.get("consecutive_failures")
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return 0
+    number = float(value)
+    return max(0, int(number)) if math.isfinite(number) else 0
+
+
+def failure_backoff_seconds(state: dict[str, object], retry_base_seconds: int) -> int:
+    exit_code = state.get("last_exit_code")
+    succeeded = (
+        not isinstance(exit_code, bool)
+        and isinstance(exit_code, (int, float))
+        and exit_code == 0
+    )
+    if exit_code is None or succeeded:
+        return 0
+    failures = max(1, consecutive_failure_count(state))
+    multiplier = min(2 ** min(failures - 1, 3), MAX_RETRY_MULTIPLIER)
+    return retry_base_seconds * multiplier
+
+
 def reset_due_epoch(
     snapshot: dict[str, object],
     *,
@@ -160,22 +185,28 @@ def refresh_decision(
     state: dict[str, object],
     now_epoch: float,
     min_age_seconds: int,
-    reset_retry_seconds: int,
+    retry_base_seconds: int,
 ) -> str | None:
     if force:
         return "force"
+    attempted_at = finite_epoch(state.get("last_attempt_at_epoch"))
+    backoff_seconds = failure_backoff_seconds(state, retry_base_seconds)
+    failure_cooling_down = (
+        attempted_at is not None
+        and backoff_seconds > 0
+        and now_epoch - attempted_at < backoff_seconds
+    )
     if due_reset is not None:
         attempted_reset = finite_epoch(state.get("reset_epoch"))
-        attempted_at = finite_epoch(state.get("last_attempt_at_epoch"))
         same_reset = attempted_reset is not None and int(attempted_reset) == due_reset
-        cooling_down = (
+        same_reset_cooling_down = (
             same_reset
             and attempted_at is not None
-            and now_epoch - attempted_at < reset_retry_seconds
+            and now_epoch - attempted_at < retry_base_seconds
         )
-        return None if cooling_down else "reset_due"
+        return None if failure_cooling_down or same_reset_cooling_down else "reset_due"
     if snapshot_age is None or snapshot_age >= min_age_seconds:
-        return "regular"
+        return None if failure_cooling_down else "regular"
     return None
 
 
@@ -198,8 +229,9 @@ def strip_terminal_codes(value: bytes) -> str:
     return text.replace("\r", "\n")
 
 
-def percentage(value: str) -> float:
-    return max(0.0, min(100.0, float(value)))
+def percentage(value: str) -> float | None:
+    number = float(value)
+    return number if math.isfinite(number) and 0 <= number <= 100 else None
 
 
 def hour_24(hour: int, meridiem: str) -> int:
@@ -262,16 +294,21 @@ def parse_usage_screen(value: bytes) -> dict[str, dict[str, float | int]]:
     compact = re.sub(r"\s+", "", strip_terminal_codes(value))
     session = SESSION_USAGE_RE.search(compact)
     weekly = WEEKLY_USAGE_RE.search(compact)
-    if session is None or weekly is None:
-        raise ValueError("Claude /usage output did not contain both subscription windows.")
 
     windows: dict[str, dict[str, float | int]] = {}
     for key, match in (("five_hour", session), ("seven_day", weekly)):
-        window: dict[str, float | int] = {"used_percentage": percentage(match.group(1))}
+        if match is None:
+            continue
+        used_percentage = percentage(match.group(1))
+        if used_percentage is None:
+            continue
+        window: dict[str, float | int] = {"used_percentage": used_percentage}
         resets_at = parse_reset_time(match.group(2))
         if resets_at is not None:
             window["resets_at"] = resets_at
         windows[key] = window
+    if not windows:
+        raise ValueError("Claude /usage output did not contain a valid subscription window.")
     return windows
 
 
@@ -425,7 +462,7 @@ def run_once(
     claude_binary: Path,
     min_age_seconds: int,
     reset_grace_seconds: int,
-    reset_retry_seconds: int,
+    retry_base_seconds: int,
     startup_delay_seconds: int,
     timeout_seconds: int,
     exit_grace_seconds: int,
@@ -458,7 +495,7 @@ def run_once(
             state=refresh_state,
             now_epoch=now_epoch,
             min_age_seconds=min_age_seconds,
-            reset_retry_seconds=reset_retry_seconds,
+            retry_base_seconds=retry_base_seconds,
         )
         if decision is None:
             if not quiet:
@@ -473,6 +510,8 @@ def run_once(
                 "schema_version": 1,
                 "last_attempt_at_epoch": now_epoch,
                 "last_attempt_reason": decision,
+                "last_exit_code": "running",
+                "consecutive_failures": consecutive_failure_count(refresh_state) + 1,
             }
         )
         if due_reset is not None:
@@ -536,6 +575,7 @@ def run_once(
                 {
                     "last_exit_code": 0,
                     "last_success_at_epoch": time.time(),
+                    "consecutive_failures": 0,
                 }
             )
             try:
@@ -615,7 +655,7 @@ def install_launch_agent(
     interval_seconds: int,
     min_age_seconds: int,
     reset_grace_seconds: int,
-    reset_retry_seconds: int,
+    retry_base_seconds: int,
     startup_delay_seconds: int,
     timeout_seconds: int,
     exit_grace_seconds: int,
@@ -645,8 +685,8 @@ def install_launch_agent(
         str(min_age_seconds),
         "--reset-grace",
         str(reset_grace_seconds),
-        "--reset-retry",
-        str(reset_retry_seconds),
+        "--retry-base",
+        str(retry_base_seconds),
         "--startup-delay",
         str(startup_delay_seconds),
         "--timeout",
@@ -703,7 +743,7 @@ def install_launch_agent(
     print(f"Probe schedule: every {interval_seconds} seconds")
     print(f"Regular refresh age: {min_age_seconds} seconds")
     print(f"Reset grace: {reset_grace_seconds} seconds")
-    print(f"Reset retry cooldown: {reset_retry_seconds} seconds")
+    print(f"Failure retry base: {retry_base_seconds} seconds")
     print(f"Project: {project}")
     print(f"Snapshot: {snapshot}")
     print(f"Refresh state: {state_path}")
@@ -755,6 +795,7 @@ def show_status(snapshot: Path, state_path: Path) -> int:
     print(f"Refresh state: {state_path}")
     print(f"Last attempt reason: {refresh_state.get('last_attempt_reason', '-')}")
     print(f"Last exit code: {refresh_state.get('last_exit_code', '-')}")
+    print(f"Consecutive failures: {refresh_state.get('consecutive_failures', 0)}")
     return 0
 
 
@@ -812,12 +853,14 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--retry-base",
         "--reset-retry",
+        dest="retry_base",
         type=positive_integer,
-        default=DEFAULT_RESET_RETRY_SECONDS,
+        default=DEFAULT_RETRY_BASE_SECONDS,
         help=(
-            "Cooldown after a reset-triggered attempt. "
-            f"Default: {DEFAULT_RESET_RETRY_SECONDS}."
+            "Base cooldown after any failed refresh; doubles up to 8x. "
+            f"Default: {DEFAULT_RETRY_BASE_SECONDS}."
         ),
     )
     parser.add_argument(
@@ -883,7 +926,7 @@ def main() -> int:
             interval_seconds=args.interval,
             min_age_seconds=args.min_age,
             reset_grace_seconds=args.reset_grace,
-            reset_retry_seconds=args.reset_retry,
+            retry_base_seconds=args.retry_base,
             startup_delay_seconds=args.startup_delay,
             timeout_seconds=args.timeout,
             exit_grace_seconds=args.exit_grace,
@@ -895,7 +938,7 @@ def main() -> int:
         claude_binary=claude_binary,
         min_age_seconds=args.min_age,
         reset_grace_seconds=args.reset_grace,
-        reset_retry_seconds=args.reset_retry,
+        retry_base_seconds=args.retry_base,
         startup_delay_seconds=args.startup_delay,
         timeout_seconds=args.timeout,
         exit_grace_seconds=args.exit_grace,

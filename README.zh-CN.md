@@ -188,9 +188,12 @@ python3 claude_usage_refresher.py --uninstall
 LaunchAgent 每 60 秒只读取一次本地快照，并不会每分钟都启动 Claude Code；普通完整
 刷新仍约每 10 分钟一次。任一已保存的 reset 时间到达后，任务会等待 30 秒让账户状态
 稳定，然后优先执行一次刷新，因此页面停留在 `Resets in now` 时通常会在 30–90 秒内
-恢复。`usage-dashboard-refresh-state.json` 只记录尝试时间、reset 时间戳和退出码；
-reset 触发的刷新失败后会冷却 5 分钟，避免每分钟重复启动 Claude。原有进程锁继续防止
-任务重叠，并清理卡住的 Claude 进程。日志仍位于 `~/.claude/usage-refresh*.log`。
+恢复。`usage-dashboard-refresh-state.json` 只记录尝试时间、reset 时间戳、退出状态和
+连续失败次数。任何完整刷新失败或意外中断后，都会依次退避 5、10、20、最多 40 分钟，
+避免 `/usage` 解析失效时每分钟重复启动 Claude。两个订阅窗口会独立解析：其中一个缺失
+或无效时仍保留另一个有效窗口；超出 0–100 的百分比会被拒绝，而不是钳成错误的 100%。
+原有进程锁继续防止任务重叠，并清理卡住的 Claude 进程。日志仍位于
+`~/.claude/usage-refresh*.log`。
 
 任务只会在 Mac 已唤醒且用户已登录时运行。从旧版 10 分钟调度升级、移动仓库或移动
 Claude 可执行文件后，需要重新执行 `--install`。这是 Claude Code 客户端自动化，并非
