@@ -193,6 +193,7 @@ class ResetAwareRefreshTest(unittest.TestCase):
                     min_age_seconds=600,
                     reset_grace_seconds=30,
                     retry_base_seconds=300,
+                    ready_timeout_seconds=30,
                     startup_delay_seconds=0,
                     timeout_seconds=1,
                     exit_grace_seconds=1,
@@ -215,6 +216,18 @@ class UsageScreenParserTest(unittest.TestCase):
 
         self.assertEqual(windows["five_hour"]["used_percentage"], 41.0)
         self.assertEqual(windows["seven_day"]["used_percentage"], 52.0)
+
+    def test_uses_latest_values_from_cumulative_screen_reader_output(self) -> None:
+        windows = refresher.parse_usage_screen(
+            b"Current session 12% 12% used Resets 6am "
+            b"Current week (all models) 4% 4% used Resets Sep 11 at 5pm "
+            b"Scanning local sessions Refreshing Esc to cancel "
+            b"13% 13% used Resets 5:59am "
+            b"Current week (all models) 5% 5% used Resets Sep 11 at 4:59pm"
+        )
+
+        self.assertEqual(windows["five_hour"]["used_percentage"], 13.0)
+        self.assertEqual(windows["seven_day"]["used_percentage"], 5.0)
 
     def test_accepts_weekly_only(self) -> None:
         windows = refresher.parse_usage_screen(
@@ -281,6 +294,14 @@ class UsageScreenParserTest(unittest.TestCase):
             saved = json.loads(snapshot.read_text(encoding="utf-8"))
 
         self.assertEqual(set(saved["rate_limits"]), {"seven_day"})
+
+
+class ExpectProgramTest(unittest.TestCase):
+    def test_waits_for_prompt_and_disables_remote_control(self) -> None:
+        self.assertIn('--settings {{"disableRemoteControl":true}}', refresher.EXPECT_PROGRAM)
+        self.assertIn("--ax-screen-reader", refresher.EXPECT_PROGRAM)
+        self.assertIn("-exact {$}", refresher.EXPECT_PROGRAM)
+        self.assertIn('send -- "/usage"', refresher.EXPECT_PROGRAM)
 
 
 if __name__ == "__main__":

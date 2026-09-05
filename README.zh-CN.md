@@ -165,6 +165,10 @@ python3 claude_usage_statusline.py --uninstall
 格式，然后使用 `Ctrl-D` 退出。`/usage` 会读取 plan limits，但不会向模型发送
 prompt。刷新器不会恢复已有对话，也不会保存终端输出，并且可以独立于 statusLine
 桥接工作。使用前需要确保 Claude Code 已登录，并且本仓库至少被信任过一次。
+刷新器只为这个临时进程禁用 Remote Control，并启用 Claude 的屏幕阅读器输出，不会
+修改用户的全局设置。它最多等待 30 秒，直到出现明确的交互输入提示，再等待 1 秒让
+界面稳定，然后才发送 `/usage`。如果本地活动扫描导致页面多次更新，解析器会分别保留
+每个订阅窗口最后一组完整数值。
 
 先测试一次刷新：
 

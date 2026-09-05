@@ -192,6 +192,12 @@ and exits with `Ctrl-D`. `/usage` reads plan limits without submitting a prompt
 to the model. The refresher does not resume a conversation or retain terminal
 output, and it can work independently of the statusLine bridge. Claude Code
 must already be signed in and this repository must have been trusted once.
+For this temporary process only, the refresher disables Remote Control and
+enables Claude's screen-reader output; it does not change the user's global
+settings. It waits up to 30 seconds for an explicit interactive prompt, waits
+one additional second for the prompt to settle, and only then sends `/usage`.
+If the screen updates while local activity is scanned, the parser keeps the
+latest complete value for each subscription window.
 
 Test one refresh first:
 

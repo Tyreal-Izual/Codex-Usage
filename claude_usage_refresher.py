@@ -42,17 +42,35 @@ DEFAULT_MIN_AGE_SECONDS = 10 * 60
 DEFAULT_RESET_GRACE_SECONDS = 30
 DEFAULT_RETRY_BASE_SECONDS = 5 * 60
 MAX_RETRY_MULTIPLIER = 8
-DEFAULT_STARTUP_DELAY_SECONDS = 5
+DEFAULT_READY_TIMEOUT_SECONDS = 30
+DEFAULT_STARTUP_DELAY_SECONDS = 1
 DEFAULT_TIMEOUT_SECONDS = 30
 DEFAULT_EXIT_GRACE_SECONDS = 8
 
 EXPECT_PROGRAM = r"""
 log_user 1
-set timeout 1
+set timeout $env(CLAUDE_REFRESH_READY_TIMEOUT)
 
-spawn -noecho $env(CLAUDE_REFRESH_BIN) --no-chrome
+spawn -noecho $env(CLAUDE_REFRESH_BIN) --settings {{"disableRemoteControl":true}} --ax-screen-reader --no-chrome
+set ready 0
+expect {
+    -exact {$} { set ready 1 }
+    eof {}
+    timeout {}
+}
+if {!$ready} {
+    puts stderr "Claude prompt did not become ready before the timeout."
+    catch {send -- "\003"}
+    after 500
+    catch {close}
+    catch {wait}
+    exit 0
+}
+
 after $env(CLAUDE_REFRESH_STARTUP_MS)
-send -- "/usage\r"
+send -- "/usage"
+after 250
+send -- "\r"
 after $env(CLAUDE_REFRESH_HOLD_MS)
 
 catch {send -- "\004"}
@@ -75,13 +93,14 @@ ANSI_CSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 ANSI_OSC_RE = re.compile(r"\x1b\][^\x07]*(?:\x07|\x1b\\)")
 PERCENT_USED_PATTERN = r"(?<!\d)(\d{1,3}(?:\.\d+)?)%used"
 SESSION_USAGE_RE = re.compile(
-    r"Currentsession(?:(?!Currentweek).)*?" + PERCENT_USED_PATTERN
+    r"(?:Currentsession|Refreshing)(?:(?!Currentweek).)*?" + PERCENT_USED_PATTERN
     + r"(?:(?!Currentweek).)*?Resets(.*?)(?=Currentweek|What.?scontributing|$)",
     re.IGNORECASE | re.DOTALL,
 )
 WEEKLY_USAGE_RE = re.compile(
     r"Currentweek(?:\(allmodels\))?.*?" + PERCENT_USED_PATTERN + r".*?Resets"
-    r"(.*?)(?=(?:\+\d+(?:\.\d+)?%weekly|What.?scontributing|$))",
+    r"(.*?)(?=(?:\+\d+(?:\.\d+)?%weekly|What.?scontributing|"
+    r"Scanninglocalsessions|Refreshing|Currentweek|$))",
     re.IGNORECASE | re.DOTALL,
 )
 MONTHS = {
@@ -292,8 +311,10 @@ def parse_reset_time(value: str, now: datetime | None = None) -> int | None:
 
 def parse_usage_screen(value: bytes) -> dict[str, dict[str, float | int]]:
     compact = re.sub(r"\s+", "", strip_terminal_codes(value))
-    session = SESSION_USAGE_RE.search(compact)
-    weekly = WEEKLY_USAGE_RE.search(compact)
+    session_matches = list(SESSION_USAGE_RE.finditer(compact))
+    weekly_matches = list(WEEKLY_USAGE_RE.finditer(compact))
+    session = session_matches[-1] if session_matches else None
+    weekly = weekly_matches[-1] if weekly_matches else None
 
     windows: dict[str, dict[str, float | int]] = {}
     for key, match in (("five_hour", session), ("seven_day", weekly)):
@@ -463,6 +484,7 @@ def run_once(
     min_age_seconds: int,
     reset_grace_seconds: int,
     retry_base_seconds: int,
+    ready_timeout_seconds: int,
     startup_delay_seconds: int,
     timeout_seconds: int,
     exit_grace_seconds: int,
@@ -539,6 +561,7 @@ def run_once(
             {
                 "TERM": environment.get("TERM") or "xterm-256color",
                 "CLAUDE_REFRESH_BIN": str(claude_binary),
+                "CLAUDE_REFRESH_READY_TIMEOUT": str(ready_timeout_seconds),
                 "CLAUDE_REFRESH_STARTUP_MS": str(startup_delay_seconds * 1000),
                 "CLAUDE_REFRESH_HOLD_MS": str(timeout_seconds * 1000),
                 "CLAUDE_REFRESH_EXIT_GRACE": str(exit_grace_seconds),
@@ -553,7 +576,13 @@ def run_once(
             stderr=subprocess.PIPE,
             start_new_session=True,
         )
-        maximum_runtime = startup_delay_seconds + timeout_seconds + exit_grace_seconds + 5
+        maximum_runtime = (
+            ready_timeout_seconds
+            + startup_delay_seconds
+            + timeout_seconds
+            + exit_grace_seconds
+            + 5
+        )
         try:
             process.wait(timeout=maximum_runtime)
         except subprocess.TimeoutExpired:
@@ -656,6 +685,7 @@ def install_launch_agent(
     min_age_seconds: int,
     reset_grace_seconds: int,
     retry_base_seconds: int,
+    ready_timeout_seconds: int,
     startup_delay_seconds: int,
     timeout_seconds: int,
     exit_grace_seconds: int,
@@ -687,6 +717,8 @@ def install_launch_agent(
         str(reset_grace_seconds),
         "--retry-base",
         str(retry_base_seconds),
+        "--ready-timeout",
+        str(ready_timeout_seconds),
         "--startup-delay",
         str(startup_delay_seconds),
         "--timeout",
@@ -744,6 +776,7 @@ def install_launch_agent(
     print(f"Regular refresh age: {min_age_seconds} seconds")
     print(f"Reset grace: {reset_grace_seconds} seconds")
     print(f"Failure retry base: {retry_base_seconds} seconds")
+    print(f"Prompt ready timeout: {ready_timeout_seconds} seconds")
     print(f"Project: {project}")
     print(f"Snapshot: {snapshot}")
     print(f"Refresh state: {state_path}")
@@ -864,11 +897,20 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--ready-timeout",
+        type=positive_integer,
+        default=DEFAULT_READY_TIMEOUT_SECONDS,
+        help=(
+            "Seconds to wait for Claude's interactive prompt. "
+            f"Default: {DEFAULT_READY_TIMEOUT_SECONDS}."
+        ),
+    )
+    parser.add_argument(
         "--startup-delay",
         type=non_negative_integer,
         default=DEFAULT_STARTUP_DELAY_SECONDS,
         help=(
-            "Seconds to let Claude Code initialise before /usage. "
+            "Seconds to settle after the interactive prompt is ready. "
             f"Default: {DEFAULT_STARTUP_DELAY_SECONDS}."
         ),
     )
@@ -927,6 +969,7 @@ def main() -> int:
             min_age_seconds=args.min_age,
             reset_grace_seconds=args.reset_grace,
             retry_base_seconds=args.retry_base,
+            ready_timeout_seconds=args.ready_timeout,
             startup_delay_seconds=args.startup_delay,
             timeout_seconds=args.timeout,
             exit_grace_seconds=args.exit_grace,
@@ -939,6 +982,7 @@ def main() -> int:
         min_age_seconds=args.min_age,
         reset_grace_seconds=args.reset_grace,
         retry_base_seconds=args.retry_base,
+        ready_timeout_seconds=args.ready_timeout,
         startup_delay_seconds=args.startup_delay,
         timeout_seconds=args.timeout,
         exit_grace_seconds=args.exit_grace,
