@@ -93,7 +93,7 @@ ANSI_CSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 ANSI_OSC_RE = re.compile(r"\x1b\][^\x07]*(?:\x07|\x1b\\)")
 PERCENT_USED_PATTERN = r"(?<!\d)(\d{1,3}(?:\.\d+)?)%used"
 SESSION_USAGE_RE = re.compile(
-    r"(?:Currentsession|Refreshing)(?:(?!Currentweek).)*?" + PERCENT_USED_PATTERN
+    r"Currentsession(?:(?!Currentweek).)*?" + PERCENT_USED_PATTERN
     + r"(?:(?!Currentweek).)*?Resets(.*?)(?=Currentweek|What.?scontributing|$)",
     re.IGNORECASE | re.DOTALL,
 )
@@ -311,6 +311,9 @@ def parse_reset_time(value: str, now: datetime | None = None) -> int | None:
 
 def parse_usage_screen(value: bytes) -> dict[str, dict[str, float | int]]:
     compact = re.sub(r"\s+", "", strip_terminal_codes(value))
+    # Screen-reader updates may omit unchanged labels. Only explicitly labelled
+    # blocks are safe to associate with a subscription window; an unlabelled
+    # update after "Refreshing" may belong to either window.
     session_matches = list(SESSION_USAGE_RE.finditer(compact))
     weekly_matches = list(WEEKLY_USAGE_RE.finditer(compact))
     session = session_matches[-1] if session_matches else None

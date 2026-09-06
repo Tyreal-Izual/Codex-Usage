@@ -197,7 +197,8 @@ enables Claude's screen-reader output; it does not change the user's global
 settings. It waits up to 30 seconds for an explicit interactive prompt, waits
 one additional second for the prompt to settle, and only then sends `/usage`.
 If the screen updates while local activity is scanned, the parser keeps the
-latest complete value for each subscription window.
+latest complete, explicitly labelled value for each subscription window. It
+never assigns an unlabelled incremental update to a window by position.
 
 Test one refresh first:
 

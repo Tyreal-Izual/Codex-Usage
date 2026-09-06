@@ -217,7 +217,7 @@ class UsageScreenParserTest(unittest.TestCase):
         self.assertEqual(windows["five_hour"]["used_percentage"], 41.0)
         self.assertEqual(windows["seven_day"]["used_percentage"], 52.0)
 
-    def test_uses_latest_values_from_cumulative_screen_reader_output(self) -> None:
+    def test_uses_latest_explicitly_labelled_values(self) -> None:
         windows = refresher.parse_usage_screen(
             b"Current session 12% 12% used Resets 6am "
             b"Current week (all models) 4% 4% used Resets Sep 11 at 5pm "
@@ -226,8 +226,22 @@ class UsageScreenParserTest(unittest.TestCase):
             b"Current week (all models) 5% 5% used Resets Sep 11 at 4:59pm"
         )
 
-        self.assertEqual(windows["five_hour"]["used_percentage"], 13.0)
+        self.assertEqual(windows["five_hour"]["used_percentage"], 12.0)
         self.assertEqual(windows["seven_day"]["used_percentage"], 5.0)
+
+    def test_unlabelled_weekly_refresh_is_not_assigned_to_five_hour(self) -> None:
+        windows = refresher.parse_usage_screen(
+            b"Current session 0% 0% used Resets 3:10am "
+            b"Current week (all models) 11% 11% used Resets Sep 11 at 5pm "
+            b"Scanning local sessions Refreshing Esc to cancel "
+            b"12% 12% used Resets Sep 11 at 4:59pm"
+        )
+
+        self.assertEqual(windows["five_hour"]["used_percentage"], 0.0)
+        self.assertNotEqual(
+            windows["five_hour"].get("resets_at"),
+            windows["seven_day"].get("resets_at"),
+        )
 
     def test_accepts_weekly_only(self) -> None:
         windows = refresher.parse_usage_screen(
