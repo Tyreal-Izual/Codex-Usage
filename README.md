@@ -272,6 +272,8 @@ immediately below Banked Resets. It shows the community's composite intelligence
 against combined cost, average duration, or average price. The independent
 `codex_radar.py` module owns collection, calculation, caching, and the chart
 component; the web entry point only mounts it and exposes its cached data.
+The title's Updated badge shows time since the last successful local sync;
+hover over it for the exact sync and source-data timestamps.
 
 While the dashboard server is running, a background worker checks the two public
 Codex Radar JSON sources every four hours, even with the browser closed. The
@@ -308,6 +310,11 @@ required. Upstream website interfaces may change; incompatible responses leave
 the last valid cache intact.
 
 ### Dashboard endpoints
+
+On opening the Overview or Codex Usage page, the first rendered Codex Online
+Rate Limits card is aligned with the top of the viewport. Later refreshes keep
+your reading position. Scrolling or changing the report during initial loading
+cancels this initial positioning; the toolbar remains accessible by scrolling up.
 
 The web server exposes:
 

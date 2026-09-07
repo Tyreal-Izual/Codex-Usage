@@ -1105,6 +1105,7 @@ INDEX_HTML = r"""<!doctype html>
       pendingRefresh: false,
       pendingForceRefresh: false,
       lastPayload: null,
+      initialPanelPositionPending: !window.location.hash,
       lang: localStorage.getItem("codexUsageLanguage") || ((navigator.language || "").toLowerCase().startsWith("zh") ? "zh" : "en")
     };
 
@@ -1627,7 +1628,7 @@ INDEX_HTML = r"""<!doctype html>
         "panel-heading-end-extras"
       );
       const html = `
-        <section class="panel${wide ? " panel--wide" : ""}">
+        <section class="panel${wide ? " panel--wide" : ""}" data-panel-id="${esc(id)}">
           <h2>
             <span class="panel-heading-main">
               <span class="panel-heading-title">${esc(title)}</span>
@@ -2295,7 +2296,8 @@ INDEX_HTML = r"""<!doctype html>
         ...renderResets(sections.resets),
         ...(["all", "codex-usage"].includes(report)
           ? [panel(CodexRadar.title(state.lang), CodexRadar.subtitle(state.lang),
-              '<div id="codex-radar"></div>', true, "codex-radar-panel")]
+              '<div id="codex-radar"></div>', true, "codex-radar-panel",
+              [{ label: t("updated"), valueHtml: '<span data-radar-age>—</span>' }])]
           : []),
         ...visibleLocalPanels,
         ...renderApiUsage(sections.api)
@@ -2306,7 +2308,22 @@ INDEX_HTML = r"""<!doctype html>
       const radarPlaceholder = document.getElementById("codex-radar");
       if (radarRoot && radarPlaceholder) radarPlaceholder.replaceWith(radarRoot);
       if (radarPlaceholder) radarFocus?.focus({preventScroll: true});
-      CodexRadar.mount(document.getElementById("codex-radar"), state.lang);
+      CodexRadar.mount(document.getElementById("codex-radar"), state.lang, fmtAgeSince);
+    }
+
+    function positionInitialPanel(report) {
+      if (!state.initialPanelPositionPending) return;
+      if (!["all", "codex-usage"].includes(report)) {
+        state.initialPanelPositionPending = false;
+        return;
+      }
+      const target = document.querySelector('[data-panel-id="codex-rate"]');
+      if (!target) return;
+      requestAnimationFrame(() => {
+        if (!state.initialPanelPositionPending || !target.isConnected) return;
+        state.initialPanelPositionPending = false;
+        target.scrollIntoView({block: "start", behavior: "instant"});
+      });
     }
 
     function queryUrl(forceIsambardRefresh = false) {
@@ -2349,6 +2366,7 @@ INDEX_HTML = r"""<!doctype html>
         render(payload);
         const when = new Date().toLocaleTimeString();
         setStatus(payload.ok ? t("upToDate") : t("loadedWithNotes"), `${t("lastRefresh")} ${when}`);
+        positionInitialPanel(payload.report);
       } catch (error) {
         showNotice([error.message || String(error)]);
         setStatus(t("refreshFailed"), t("refreshFailedDetail"));
@@ -2379,7 +2397,10 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     $("refresh-now").addEventListener("click", () => refresh(true));
-    $("report").addEventListener("change", refresh);
+    $("report").addEventListener("change", () => {
+      state.initialPanelPositionPending = false;
+      refresh();
+    });
     $("days").addEventListener("change", refresh);
     $("refresh").addEventListener("change", schedule);
     $("auto").addEventListener("change", schedule);
@@ -2400,6 +2421,17 @@ INDEX_HTML = r"""<!doctype html>
     if (requestedReport && Array.from($("report").options).some((option) => option.value === requestedReport)) {
       $("report").value = requestedReport;
     }
+    if (state.initialPanelPositionPending && ["all", "codex-usage"].includes($("report").value)) {
+      history.scrollRestoration = "manual";
+    }
+    const cancelInitialPosition = () => { state.initialPanelPositionPending = false; };
+    window.addEventListener("wheel", cancelInitialPosition, {passive: true});
+    window.addEventListener("touchmove", cancelInitialPosition, {passive: true});
+    window.addEventListener("keydown", (event) => {
+      if (["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(event.key)) {
+        cancelInitialPosition();
+      }
+    });
     applyLanguage();
     setStatus(t("statusStarting"), t("statusWaiting"));
     refresh();

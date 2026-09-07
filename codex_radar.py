@@ -399,7 +399,7 @@ SCRIPT = r"""
           cost: "成本指数", minutes: "分钟", usd: "USD", hint: "悬停、点击或用键盘聚焦数据点查看数值。",
           formula: "社区评测分数。IQ、费用和耗时按软件工程与视觉任务的有效题量加权。综合成本 ∝ 费用 × (分钟 / 10)^3.053，最高成本归一为 100。横轴 // 表示压缩的对数区间。" }
       };
-      let root = null, lang = "en", metric = "combined", payload = null;
+      let root = null, lang = "en", metric = "combined", payload = null, formatAge = null;
       let pending = false, checkedAt = 0, timer = null, localError = false, tableOpen = false, signature = "";
       const esc = (v) => String(v ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"}[c]));
       const t = (key) => words[lang][key];
@@ -461,6 +461,13 @@ SCRIPT = r"""
       }
       function render() {
         if (!root?.isConnected) return;
+        const age = root.closest('section')?.querySelector('[data-radar-age]');
+        if (age) {
+          const syncedAt = Date.parse(payload?.fetched_at || '');
+          age.textContent = Number.isFinite(syncedAt) && formatAge ? formatAge(syncedAt) : '—';
+          age.title = `${t("sync")}: ${date(payload?.fetched_at)} · ${t("through")}: ${date(payload?.data?.source_updated_at)}`;
+          age.closest('.panel-heading-extra')?.classList.toggle('panel-heading-extra--warn', Boolean(payload?.stale || localError));
+        }
         const key=JSON.stringify([payload,lang,metric,localError,Math.round(root.clientWidth)]);
         if (signature===key) return;
         signature=key;
@@ -471,12 +478,14 @@ SCRIPT = r"""
         const p=payload, data=p?.data, points=data?.points || [];
         const warning=localError ? t("failed") : p?.stale ? t("stale") : p?.cache_warning ? t("cache") : "";
         const meta=p ? `${t("cadence")} · ${t("sync")}: ${date(p.fetched_at)} · ${t("through")}: ${date(data?.source_updated_at)} · ${t("next")}: ${date(p.next_attempt_at)}` : t("cadence");
-        root.innerHTML=`<div class="radar-toolbar"><label>${t("metric")}<select aria-label="${t("metric")}" data-radar-metric>${["combined","time","price"].map(k=>`<option value="${k}" ${k===metric?'selected':''}>${t(k)}</option>`).join('')}</select></label><a class="radar-source" href="https://codexradar.com/" target="_blank" rel="noopener noreferrer">${t("source")}</a></div><div class="radar-meta">${esc(meta)}${p?.refreshing?' · '+t("refreshing"):''}</div>${warning?`<p class="radar-warning" role="status">${warning}</p>`:''}`;
+        const toolbar=`<div class="radar-toolbar"><label>${t("metric")}<select aria-label="${t("metric")}" data-radar-metric>${["combined","time","price"].map(k=>`<option value="${k}" ${k===metric?'selected':''}>${t(k)}</option>`).join('')}</select></label><a class="radar-source" href="https://codexradar.com/" target="_blank" rel="noopener noreferrer">${t("source")}</a></div><div class="radar-meta">${esc(meta)}${p?.refreshing?' · '+t("refreshing"):''}</div>${warning?`<p class="radar-warning" role="status">${warning}</p>`:''}`;
         if (!points.length) {
-          root.innerHTML+=`<div class="empty" role="status">${p?.last_error || localError ? t("unavailable") : t("loading")}</div>`;
+          root.innerHTML=toolbar+`<div class="empty" role="status">${p?.last_error || localError ? t("unavailable") : t("loading")}</div>`;
           return;
         }
-        root.innerHTML+=`<div class="radar-legend">${Object.entries(models).filter(([m])=>points.some(p=>p.model===m)).map(([, [name,color]])=>`<span><i style="background:${color}"></i>${name}</span>`).join('')}<span>${t("efficient")}</span></div><div class="radar-chart">${chart(points)}</div><div class="radar-detail" aria-live="polite">${t("hint")}</div><p class="radar-formula">${t("formula")}</p><details class="radar-table" ${tableOpen?'open':''}><summary>${t("table")} · ${points.length}</summary><div class="table-wrap"><table><thead><tr>${[t("model"),t("effort"),"IQ",t("cost"),t("usd"),t("minutes")].map(v=>`<th>${v}</th>`).join('')}</tr></thead><tbody>${points.map(p=>`<tr>${[models[p.model][0],p.effort,fmt(p.iq),fmt(p.combined_cost_index),fmt(p.average_price_usd),fmt(p.average_minutes)].map(v=>`<td>${esc(v)}</td>`).join('')}</tr>`).join('')}</tbody></table></div></details>`;
+        // Build the chart before replacing DOM: measuring a temporarily empty
+        // panel can clamp the page scroll position during a background refresh.
+        root.innerHTML=toolbar+`<div class="radar-legend">${Object.entries(models).filter(([m])=>points.some(p=>p.model===m)).map(([, [name,color]])=>`<span><i style="background:${color}"></i>${name}</span>`).join('')}<span>${t("efficient")}</span></div><div class="radar-chart">${chart(points)}</div><div class="radar-detail" aria-live="polite">${t("hint")}</div><p class="radar-formula">${t("formula")}</p><details class="radar-table" ${tableOpen?'open':''}><summary>${t("table")} · ${points.length}</summary><div class="table-wrap"><table><thead><tr>${[t("model"),t("effort"),"IQ",t("cost"),t("usd"),t("minutes")].map(v=>`<th>${v}</th>`).join('')}</tr></thead><tbody>${points.map(p=>`<tr>${[models[p.model][0],p.effort,fmt(p.iq),fmt(p.combined_cost_index),fmt(p.average_price_usd),fmt(p.average_minutes)].map(v=>`<td>${esc(v)}</td>`).join('')}</tr>`).join('')}</tbody></table></div></details>`;
         root.querySelector("details").addEventListener("toggle", e => {tableOpen=e.target.open;});
         if (activePoint!==null) root.querySelector(`[data-radar-point="${activePoint}"]`)?.focus({preventScroll:true});
         else if (activeSelector) root.querySelector('select').focus({preventScroll:true});
@@ -502,8 +511,9 @@ SCRIPT = r"""
       return {
         title: (language) => words[language].title,
         subtitle: (language) => words[language].subtitle,
-        mount(element, language) {
+        mount(element, language, ageFormatter) {
           lang=language;
+          formatAge=ageFormatter;
           if (root!==element) {
             observer.disconnect(); root=element; signature="";
             if (!root) {clearTimeout(timer); return;}
