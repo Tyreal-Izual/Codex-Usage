@@ -132,6 +132,13 @@ http://127.0.0.1:8765/isambard-maintenance
 
 ## 页面结构
 
+总览与 Codex 用量页的 Banked Resets 下方新增 Codex Radar 综合智能曲线。
+独立模块 `codex_radar.py` 同时封装数据采集、加权计算、后台缓存和前端组件，
+主页面只调用组件；`GET /api/codex-radar` 使用现有鉴权并直接读取内存快照。
+后台线程每四小时更新，失败时保留旧曲线并退避重试，不阻塞其他用量采集。
+无需浏览器保持打开，但需要网页服务器运行；休眠结束后重新检查到期时间。
+完整口径、命令和缓存说明见 [README.zh-CN.md](README.zh-CN.md#codex-radar-评测曲线)。
+
 当前总览页面主要包含：
 
 | 区域 | 说明 |

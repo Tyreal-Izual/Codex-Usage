@@ -27,6 +27,7 @@ from typing import Any, Callable
 import codex_usage
 import claude_usage
 import isambard_status
+import codex_radar
 
 
 DEFAULT_HOST = "127.0.0.1"
@@ -212,6 +213,12 @@ class BoundedThreadingHTTPServer(ThreadingHTTPServer):
         finally:
             self._request_slots.release()
 
+    def server_close(self) -> None:
+        radar = getattr(self, "radar_service", None)
+        if radar is not None:
+            radar.close()
+        super().server_close()
+
 
 INDEX_HTML = r"""<!doctype html>
 <html lang="en">
@@ -220,6 +227,7 @@ INDEX_HTML = r"""<!doctype html>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Codex &amp; Claude Code Usage Dashboard</title>
   <style>
+    __RADAR_STYLE__
     :root {
       color-scheme: dark;
       --bg: #0b1110;
@@ -1090,6 +1098,7 @@ INDEX_HTML = r"""<!doctype html>
   </main>
 
   <script>
+    __RADAR_SCRIPT__
     const state = {
       timer: null,
       loading: false,
@@ -2284,10 +2293,20 @@ INDEX_HTML = r"""<!doctype html>
         ...visibleClaudePanels,
         ...pairedPanels,
         ...renderResets(sections.resets),
+        ...(["all", "codex-usage"].includes(report)
+          ? [panel(CodexRadar.title(state.lang), CodexRadar.subtitle(state.lang),
+              '<div id="codex-radar"></div>', true, "codex-radar-panel")]
+          : []),
         ...visibleLocalPanels,
         ...renderApiUsage(sections.api)
       ];
+      const radarRoot = document.getElementById("codex-radar");
+      const radarFocus = radarRoot?.contains(document.activeElement) ? document.activeElement : null;
       $("sections").innerHTML = packSections(panels);
+      const radarPlaceholder = document.getElementById("codex-radar");
+      if (radarRoot && radarPlaceholder) radarPlaceholder.replaceWith(radarRoot);
+      if (radarPlaceholder) radarFocus?.focus({preventScroll: true});
+      CodexRadar.mount(document.getElementById("codex-radar"), state.lang);
     }
 
     function queryUrl(forceIsambardRefresh = false) {
@@ -2388,6 +2407,11 @@ INDEX_HTML = r"""<!doctype html>
 </body>
 </html>
 """
+
+
+INDEX_HTML = INDEX_HTML.replace("__RADAR_STYLE__", codex_radar.STYLE).replace(
+    "__RADAR_SCRIPT__", codex_radar.SCRIPT
+)
 
 
 MAINTENANCE_HTML = r"""<!doctype html>
@@ -3024,6 +3048,7 @@ class UsageWebHandler(BaseHTTPRequestHandler):
             "/index.html",
             "/isambard-maintenance",
             "/api/usage",
+            "/api/codex-radar",
         } and self.reject_missing_access(include_body=False):
             return
         if parsed.path in {"/", "/index.html"}:
@@ -3034,6 +3059,9 @@ class UsageWebHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/healthz":
             self.send_json({"ok": True, "time": time.time()}, include_body=False)
+            return
+        if parsed.path == "/api/codex-radar":
+            self.send_json(self.server.radar_service.snapshot(), include_body=False)
             return
         self.send_json({"ok": False, "error": "not found"}, status=404, include_body=False)
 
@@ -3048,6 +3076,7 @@ class UsageWebHandler(BaseHTTPRequestHandler):
             "/index.html",
             "/isambard-maintenance",
             "/api/usage",
+            "/api/codex-radar",
         } and self.reject_missing_access(include_body=True):
             return
         if parsed.path in {"/", "/index.html"}:
@@ -3058,6 +3087,9 @@ class UsageWebHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/usage":
             self.send_usage(parsed.query)
+            return
+        if parsed.path == "/api/codex-radar":
+            self.send_json(self.server.radar_service.snapshot())
             return
         if parsed.path == "/healthz":
             self.send_json({"ok": True, "time": time.time()})
@@ -3295,6 +3327,7 @@ def create_server(
     max_workers: int,
     max_collectors: int,
     cache_seconds: int,
+    radar_service: codex_radar.RadarService | None = None,
 ) -> BoundedThreadingHTTPServer:
     if not access_token:
         raise ValueError("access_token must not be empty")
@@ -3311,6 +3344,7 @@ def create_server(
     server.access_token = access_token
     server.allowed_hosts = allowed
     server.report_coordinator = coordinator
+    server.radar_service = radar_service if radar_service is not None else codex_radar.RadarService()
     return server
 
 
@@ -3348,6 +3382,7 @@ def main(argv: list[str] | None = None) -> None:
     print("Keep this URL private. The token is removed after the first page load.")
     print("Press Ctrl-C to stop.")
     try:
+        server.radar_service.start()
         server.serve_forever()
     except KeyboardInterrupt:
         print("\nStopping Codex & Claude Code Usage dashboard.")

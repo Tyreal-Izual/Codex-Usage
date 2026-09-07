@@ -5,3 +5,4 @@ __pycache__/
 isambard_status_snapshot.json
 usage-dashboard.json
 usage-dashboard-refresh-state.json
+codex_radar_snapshot.json

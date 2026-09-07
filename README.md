@@ -265,6 +265,50 @@ the `top` query parameter to choose a different limit.
 
 ## Local JSON API
 
+### Codex Radar benchmark curves
+
+The Overview and Codex Usage views include a full-width **Codex Radar** panel
+immediately below Banked Resets. It shows the community's composite intelligence
+against combined cost, average duration, or average price. The independent
+`codex_radar.py` module owns collection, calculation, caching, and the chart
+component; the web entry point only mounts it and exposes its cached data.
+
+While the dashboard server is running, a background worker checks the two public
+Codex Radar JSON sources every four hours, even with the browser closed. The
+first run fetches immediately; a restart reuses a fresh disk cache. Sleep or
+offline time can delay updates. Failed refreshes retain the last successful
+snapshot and retry after 15, 30, 60, 120, then at most 240 minutes. The panel
+distinguishes source-data time from local sync time and marks stale results.
+
+IQ, price, and duration use the source site's valid-task-weighted composite of
+software engineering and visual-spatial results. Cost is proportional to
+`price * (minutes / 10) ** (log(2.5) / log(1.35))`, normalized so the largest
+composite cost is 100. The horizontal axis is logarithmic, with a marked
+compressed gap when the smallest value is far below the rest. Only configurations
+with both components and complete measured metrics are plotted. These are
+community benchmark scores, not account usage or official OpenAI ratings.
+
+The authenticated `GET /api/codex-radar` endpoint only reads memory; it never
+starts an upstream fetch. Browser refresh controls do not override the four-hour
+schedule. Hover, tap, or keyboard-focus a point for values, or expand the data
+table. English/Chinese follows the dashboard language.
+
+The ignored `codex_radar_snapshot.json` file stores sanitized benchmark data and
+retry timing, with no credentials. A standalone cache update is also available:
+
+```sh
+python3 codex_radar.py                 # update only when due, then print JSON
+python3 codex_radar.py --force         # explicitly refresh the disk cache now
+python3 codex_radar.py --cache /tmp/radar.json
+```
+
+Standalone updates are loaded by the web service on its next restart; the running
+service owns its in-memory snapshot. No LaunchAgent or Codex scheduled task is
+required. Upstream website interfaces may change; incompatible responses leave
+the last valid cache intact.
+
+### Dashboard endpoints
+
 The web server exposes:
 
 ```text
@@ -272,6 +316,7 @@ GET /
 GET /isambard-maintenance
 GET /healthz
 GET /api/usage
+GET /api/codex-radar
 ```
 
 The API requires the browser session cookie. Command-line clients can instead
