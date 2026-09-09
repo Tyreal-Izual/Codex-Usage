@@ -315,6 +315,8 @@ On opening the Overview or Codex Usage page, the first rendered Codex Online
 Rate Limits card is aligned with the top of the viewport. Later refreshes keep
 your reading position. Scrolling or changing the report during initial loading
 cancels this initial positioning; the toolbar remains accessible by scrolling up.
+A floating **Back to limits** button in the bottom-right corner returns to the
+Codex limit card after scrolling down. It appears when that card is available.
 
 The web server exposes:
 

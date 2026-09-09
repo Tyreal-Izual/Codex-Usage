@@ -1046,6 +1046,22 @@ INDEX_HTML = r"""<!doctype html>
         white-space: normal;
       }
     }
+    .return-to-limits {
+      position: fixed;
+      right: max(16px, env(safe-area-inset-right));
+      bottom: max(16px, env(safe-area-inset-bottom));
+      z-index: 20;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 44px;
+      padding: 10px 14px;
+      border-radius: 999px;
+      box-shadow: var(--shadow);
+    }
+    .return-to-limits[hidden] { display: none; }
+    .return-to-limits:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+    body.has-return-to-limits .shell { padding-bottom: calc(88px + env(safe-area-inset-bottom)); }
   </style>
 </head>
 <body>
@@ -1097,6 +1113,13 @@ INDEX_HTML = r"""<!doctype html>
     <div id="sections" class="sections"></div>
   </main>
 
+  <button id="return-to-limits" class="return-to-limits" type="button" hidden>
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M6 5h12M6 15l6-6 6 6M12 9v11"/>
+    </svg>
+    <span data-i18n="backToLimits">Back to limits</span>
+  </button>
+
   <script>
     __RADAR_SCRIPT__
     const state = {
@@ -1119,6 +1142,7 @@ INDEX_HTML = r"""<!doctype html>
         statusWaiting: "Waiting for the first refresh.",
         report: "Report",
         reportAll: "Overview: Codex + Claude Code",
+        backToLimits: "Back to limits",
         reportCodex: "Codex Usage",
         reportClaude: "Claude Code Usage",
         reportIsambard: "Isambard Service Status",
@@ -1279,6 +1303,7 @@ INDEX_HTML = r"""<!doctype html>
         statusWaiting: "等待第一次刷新。",
         report: "报告",
         reportAll: "总览：Codex + Claude Code",
+        backToLimits: "返回在线限额",
         reportCodex: "Codex 用量",
         reportClaude: "Claude Code 用量",
         reportIsambard: "Isambard 服务状态",
@@ -2309,6 +2334,9 @@ INDEX_HTML = r"""<!doctype html>
       if (radarRoot && radarPlaceholder) radarPlaceholder.replaceWith(radarRoot);
       if (radarPlaceholder) radarFocus?.focus({preventScroll: true});
       CodexRadar.mount(document.getElementById("codex-radar"), state.lang, fmtAgeSince);
+      const hasRateLimits = Boolean(document.querySelector('[data-panel-id="codex-rate"]'));
+      $("return-to-limits").hidden = !hasRateLimits;
+      document.body.classList.toggle("has-return-to-limits", hasRateLimits);
     }
 
     function positionInitialPanel(report) {
@@ -2397,6 +2425,14 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     $("refresh-now").addEventListener("click", () => refresh(true));
+    $("return-to-limits").addEventListener("click", () => {
+      state.initialPanelPositionPending = false;
+      const target = document.querySelector('[data-panel-id="codex-rate"]');
+      target?.scrollIntoView({
+        block: "start",
+        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth"
+      });
+    });
     $("report").addEventListener("change", () => {
       state.initialPanelPositionPending = false;
       refresh();
