@@ -272,6 +272,9 @@ python3 codex_radar.py --cache /tmp/radar.json
 Codex / Claude 剩余百分比、Credits 余额和重置次数在显示值变化时，数字会轻微放大一次
 （600 毫秒），并在四秒内淡出高亮。首次加载、报告或语言切换、缺失值、age 和倒计时
 不会触发。系统开启“减少动态效果”时仅保留高亮；快速刷新会延续效果，不会重复弹动。
+Claude Code Models 和 Codex Models 中每个模型的请求/任务数、token 数、占比，以及
+面板汇总的总 token 和模型数量，也使用相同效果。前后按平台和模型名称匹配，
+仅调整排行顺序不会误闪。
 
 网页服务提供：
 

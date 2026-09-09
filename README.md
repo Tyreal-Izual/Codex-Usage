@@ -319,6 +319,9 @@ A floating **Back to limits** button in the bottom-right corner returns to the
 Codex limit card after scrolling down. It appears when that card is available.
 Changed Codex/Claude remaining percentages, Credits balance, and reset counts
 pulse gently once (600 ms) and fade out of a soft highlight over four seconds.
+The Claude Code Models and Codex Models panels use the same effect for per-model
+request/thread counts, tokens, shares, and their total-token/model-count summaries.
+Rows are matched by provider and model name, so reordering alone does not flash.
 Only changes to displayed values trigger this cue; initial loads, report/language
 switches, missing values, ages, and countdowns do not. Reduced-motion preferences
 disable the scaling while retaining the highlight. Fast refreshes continue the

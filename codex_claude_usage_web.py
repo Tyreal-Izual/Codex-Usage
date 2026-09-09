@@ -1527,6 +1527,10 @@ INDEX_HTML = r"""<!doctype html>
       return `<span class="tracked-value" data-change-key="${esc(key)}" data-change-value="${esc(text)}">${esc(text)}</span>`;
     }
 
+    function trackedModelNumber(provider, model, field, value, display) {
+      return trackedNumber(JSON.stringify([provider, "model", model, field]), value, display);
+    }
+
     const valueChangeTimes = new Map();
     function displayedTrackedValues() {
       return new Map(Array.from($("sections").querySelectorAll('[data-change-key]'),
@@ -1912,7 +1916,7 @@ INDEX_HTML = r"""<!doctype html>
         </span>`;
     }
 
-    function sqliteModelStack(sqliteModels) {
+    function sqliteModelStack(sqliteModels, changePrefix) {
       if (!Array.isArray(sqliteModels) || sqliteModels.length === 0) {
         return "";
       }
@@ -1933,8 +1937,8 @@ INDEX_HTML = r"""<!doctype html>
       return `
         <div class="sqlite-stack">
           <div class="sqlite-stack-meta">
-            <span>${esc(fmtNumber(total))} ${esc(t("tokensUsed"))}</span>
-            <span>${esc(rows.length)} ${esc(t("models"))}</span>
+            <span>${trackedNumber(`${changePrefix}.total`, total)} ${esc(t("tokensUsed"))}</span>
+            <span>${trackedNumber(`${changePrefix}.count`, rows.length)} ${esc(t("models"))}</span>
           </div>
           <div class="sqlite-stack-bar">${segments}</div>
         </div>`;
@@ -1947,7 +1951,7 @@ INDEX_HTML = r"""<!doctype html>
       return sqliteModelStack(rows.map((row) => ({
         model: row.model || "-",
         tokens_used: asNumber(row.total_tokens) || 0
-      })));
+      })), "claude.models");
     }
 
     function splitSections(data, report) {
@@ -2025,9 +2029,10 @@ INDEX_HTML = r"""<!doctype html>
         : 0;
       const sqliteRows = Array.isArray(sqliteModels) ? sqliteModels.map((row, index) => [
         sqliteModelKey(row.model || "-", index),
-        esc(fmtNumber(row.threads)),
-        esc(fmtNumber(row.tokens_used)),
-        esc(fmtPercent(sqliteTotal > 0 ? (asNumber(row.tokens_used) || 0) / sqliteTotal * 100 : null))
+        trackedModelNumber("codex", row.model, "threads", row.threads),
+        trackedModelNumber("codex", row.model, "tokens", row.tokens_used),
+        trackedModelNumber("codex", row.model, "share", sqliteTotal > 0 ? (asNumber(row.tokens_used) || 0) / sqliteTotal * 100 : null,
+          fmtPercent(sqliteTotal > 0 ? (asNumber(row.tokens_used) || 0) / sqliteTotal * 100 : null))
       ]) : [];
       const detailsLink = showDetailsLink
         ? `<a class="detail-link" href="/?report=codex-usage">${esc(t("viewCodexDetails"))}</a>`
@@ -2038,7 +2043,7 @@ INDEX_HTML = r"""<!doctype html>
 
       return [
         panel(t("localTokenTotals"), t("localTokenSubtitle"), table([t("field"), t("total")], tokenRows, [1]), false, "codex-totals"),
-        panel(t("sqliteModelCounters"), t("sqliteSubtitle"), sqliteModelStack(sqliteModels) + table([t("model"), t("threads"), t("tokensUsed"), t("share")], sqliteRows, [1, 2, 3], "sqlite-table") + detailsLink, false, "codex-models", modelHeaderExtras),
+        panel(t("sqliteModelCounters"), t("sqliteSubtitle"), sqliteModelStack(sqliteModels, "codex.models") + table([t("model"), t("threads"), t("tokensUsed"), t("share")], sqliteRows, [1, 2, 3], "sqlite-table") + detailsLink, false, "codex-models", modelHeaderExtras),
         panel(t("dailyLocalUsage"), `${daily.length} ${t("dayWindow")}`, dailyHeatmap(daily), false, "daily"),
         panel(t("topSessions"), t("topSessionsSubtitle"), table([t("date"), t("model"), t("total"), t("output"), t("project"), t("sessionFile")], topRows, [2, 3]), true, "codex-sessions")
       ];
@@ -2154,9 +2159,10 @@ INDEX_HTML = r"""<!doctype html>
       const modelTotal = models.reduce((sum, row) => sum + (asNumber(row.total_tokens) || 0), 0);
       const modelRows = models.map((row, index) => [
         sqliteModelKey(row.model || "-", index),
-        esc(fmtNumber(row.requests)),
-        esc(fmtNumber(row.total_tokens)),
-        esc(fmtPercent(modelTotal > 0 ? (asNumber(row.total_tokens) || 0) / modelTotal * 100 : null))
+        trackedModelNumber("claude", row.model, "requests", row.requests),
+        trackedModelNumber("claude", row.model, "tokens", row.total_tokens),
+        trackedModelNumber("claude", row.model, "share", modelTotal > 0 ? (asNumber(row.total_tokens) || 0) / modelTotal * 100 : null,
+          fmtPercent(modelTotal > 0 ? (asNumber(row.total_tokens) || 0) / modelTotal * 100 : null))
       ]);
 
       const projects = Array.isArray(local.by_project) ? local.by_project : [];
