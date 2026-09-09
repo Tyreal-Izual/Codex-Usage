@@ -1060,6 +1060,19 @@ INDEX_HTML = r"""<!doctype html>
       box-shadow: var(--shadow);
     }
     .return-to-limits[hidden] { display: none; }
+    .tracked-value { display: inline-block; border-radius: 3px; font-variant-numeric: tabular-nums; }
+    .value-changed { animation: value-pulse 600ms ease-out, value-highlight 4s ease-out; }
+    @keyframes value-pulse {
+      0%, 100% { transform: scale(1); }
+      35% { transform: scale(1.06); }
+    }
+    @keyframes value-highlight {
+      0%, 55% { background-color: rgba(70, 211, 184, .18); box-shadow: 0 0 0 4px rgba(70, 211, 184, .10); }
+      100% { background-color: transparent; box-shadow: 0 0 0 4px transparent; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .value-changed { animation-name: value-highlight; animation-duration: 4s; }
+    }
     .return-to-limits:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
     body.has-return-to-limits .shell { padding-bottom: calc(88px + env(safe-area-inset-bottom)); }
   </style>
@@ -1508,6 +1521,40 @@ INDEX_HTML = r"""<!doctype html>
       return Math.round(number).toLocaleString();
     }
 
+    function trackedNumber(key, value, display) {
+      if (value == null || value === "" || typeof value === "boolean" || asNumber(value) === null) return "-";
+      const text = display ?? fmtNumber(value);
+      return `<span class="tracked-value" data-change-key="${esc(key)}" data-change-value="${esc(text)}">${esc(text)}</span>`;
+    }
+
+    const valueChangeTimes = new Map();
+    function displayedTrackedValues() {
+      return new Map(Array.from($("sections").querySelectorAll('[data-change-key]'),
+        node => [node.dataset.changeKey, node.dataset.changeValue]));
+    }
+
+    function highlightChangedValues(previous, enabled) {
+      if (!enabled) valueChangeTimes.clear();
+      const now = performance.now();
+      const seen = new Set();
+      $("sections").querySelectorAll('[data-change-key]').forEach(node => {
+        const {changeKey: key, changeValue: value} = node.dataset;
+        seen.add(key);
+        if (enabled && previous.has(key) && previous.get(key) !== value) {
+          valueChangeTimes.set(key, {value, started: now});
+        }
+        const change = valueChangeTimes.get(key);
+        if (!change || change.value !== value || now - change.started >= 4000) return;
+        node.classList.add('value-changed');
+        // Continue an existing highlight across fast refreshes without pulsing again.
+        const elapsed = now - change.started;
+        node.style.animationDelay = `-${elapsed}ms, -${elapsed}ms`;
+      });
+      for (const [key, change] of valueChangeTimes) {
+        if (!seen.has(key) || now - change.started >= 4000) valueChangeTimes.delete(key);
+      }
+    }
+
     function fmtPercent(value) {
       const number = asNumber(value);
       return number === null ? "-" : `${number.toFixed(1)}%`;
@@ -1701,18 +1748,21 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     function limitLeft(usedValue) {
+      if (usedValue == null || usedValue === "" || typeof usedValue === "boolean") return null;
       const used = asNumber(usedValue);
       return used === null ? null : Math.max(0, Math.min(100, 100 - used));
     }
 
-    function leftBar(label, usedValue, hint, footer = "") {
+    function leftBar(label, usedValue, hint, footer = "", changeKey = "") {
       const left = limitLeft(usedValue);
       const percent = left === null ? 0 : left;
       const tone = left !== null && left <= 10 ? "bad" : left !== null && left <= 25 ? "warn" : "";
-      const valueText = left === null ? "-" : state.lang === "zh" ? `${t("left")} ${left.toFixed(1)}%` : `${left.toFixed(1)}% ${t("left")}`;
+      const numberHtml = left === null ? "-" : changeKey
+        ? trackedNumber(changeKey, left, `${left.toFixed(1)}%`) : esc(`${left.toFixed(1)}%`);
+      const valueHtml = left === null ? "-" : state.lang === "zh" ? `${esc(t("left"))} ${numberHtml}` : `${numberHtml} ${esc(t("left"))}`;
       return `
         <div class="barbox">
-          <div class="barhead"><span>${esc(label)}</span><span>${esc(valueText)}</span></div>
+          <div class="barhead"><span>${esc(label)}</span><span>${valueHtml}</span></div>
           <div class="track"><div class="fill ${tone}" style="width: ${percent}%"></div></div>
           <div class="bar-meta">
             <span class="subtle">${esc(hint || "")}</span>
@@ -1939,9 +1989,9 @@ INDEX_HTML = r"""<!doctype html>
       });
       const credits = table(["#", t("status"), t("expiresLocally"), t("timeRemaining"), t("grantedLocally")], rows, [], "reset-credits-table");
       const headerExtras = [
-        { label: t("availableResets"), value: fmtNumber(resets.available_count) },
-        { label: t("creditsReturned"), value: fmtNumber(resets.credits_returned) },
-        { label: t("totalEarnedCount"), value: fmtNumber(resets.total_earned_count) }
+        { label: t("availableResets"), valueHtml: trackedNumber("codex.resets.available", resets.available_count) },
+        { label: t("creditsReturned"), valueHtml: trackedNumber("codex.resets.returned", resets.credits_returned) },
+        { label: t("totalEarnedCount"), valueHtml: trackedNumber("codex.resets.earned", resets.total_earned_count) }
       ];
       if (asNumber(resets.retrieved_at_unix_ms) !== null) {
         headerExtras.unshift({ label: t("retrieved"), value: fmtAgeSince(resets.retrieved_at_unix_ms) });
@@ -2011,7 +2061,7 @@ INDEX_HTML = r"""<!doctype html>
           tone: limitReached === true ? "bad" : limitReached === false ? "good" : ""
         },
         { label: t("updated"), value: fmtAgeSince(online.retrieved_at_unix_ms) },
-        { label: t("creditsBalance"), value: fmtNumber(get(rate, ["credits", "balance"])), position: "end" },
+        { label: t("creditsBalance"), valueHtml: trackedNumber("codex.credits.balance", get(rate, ["credits", "balance"])), position: "end" },
         { label: t("hasCredits"), value: get(rate, ["credits", "has_credits"], "-"), position: "end" }
       ];
       const stats = profile.stats || {};
@@ -2023,7 +2073,7 @@ INDEX_HTML = r"""<!doctype html>
       ];
       const primaryReset = `${t("resetsIn")} ${fmtDurationSeconds(windows.primary ? windows.primary.reset_after_seconds : undefined)}`;
       const weeklyReset = `${t("resetsIn")} ${fmtDurationSeconds(windows.weekly ? windows.weekly.reset_after_seconds : undefined)}`;
-      const bars = `<div class="bars">${leftBar(t("primaryWindow"), windows.primary ? windows.primary.used_percent : undefined, t("primaryHint"), primaryReset)}${leftBar(t("weeklyWindow"), windows.weekly ? windows.weekly.used_percent : undefined, t("weeklyHint"), weeklyReset)}</div>`;
+      const bars = `<div class="bars">${leftBar(t("primaryWindow"), windows.primary ? windows.primary.used_percent : undefined, t("primaryHint"), primaryReset, "codex.primary.remaining")}${leftBar(t("weeklyWindow"), windows.weekly ? windows.weekly.used_percent : undefined, t("weeklyHint"), weeklyReset, "codex.weekly.remaining")}</div>`;
       return [
         panel(t("onlineRateLimits"), t("onlineSubtitle"), bars, true, "codex-rate", headerExtras),
         panel(t("profileStatistics"), t("profileSubtitle"), table([t("metric"), t("value")], profileRows, [1]), false, "profile")
@@ -2088,7 +2138,7 @@ INDEX_HTML = r"""<!doctype html>
         </div>` : "";
       const fiveHourReset = `${t("resetsIn")} ${fmtDurationSeconds(fiveHour?.reset_after_seconds)}`;
       const sevenDayReset = `${t("resetsIn")} ${fmtDurationSeconds(sevenDay?.reset_after_seconds)}`;
-      const bars = `<div class="bars">${leftBar(t("claudeFiveHour"), fiveHour?.used_percentage, t("claudeFiveHourHint"), fiveHourReset)}${leftBar(t("claudeWeekly"), sevenDay?.used_percentage, t("claudeWeeklyHint"), sevenDayReset)}</div>`;
+      const bars = `<div class="bars">${leftBar(t("claudeFiveHour"), fiveHour?.used_percentage, t("claudeFiveHourHint"), fiveHourReset, "claude.primary.remaining")}${leftBar(t("claudeWeekly"), sevenDay?.used_percentage, t("claudeWeeklyHint"), sevenDayReset, "claude.weekly.remaining")}</div>`;
 
       const totals = local.token_totals || {};
       const tokenRows = ["input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "total_tokens"]
@@ -2253,7 +2303,8 @@ INDEX_HTML = r"""<!doctype html>
       ];
     }
 
-    function render(payload) {
+    function render(payload, highlightChanges = false) {
+      const previousValues = displayedTrackedValues();
       const report = payload.report;
       const data = payload.data || {};
       const sections = splitSections(data, report);
@@ -2337,6 +2388,7 @@ INDEX_HTML = r"""<!doctype html>
       const hasRateLimits = Boolean(document.querySelector('[data-panel-id="codex-rate"]'));
       $("return-to-limits").hidden = !hasRateLimits;
       document.body.classList.toggle("has-return-to-limits", hasRateLimits);
+      highlightChangedValues(previousValues, highlightChanges);
     }
 
     function positionInitialPanel(report) {
@@ -2390,8 +2442,9 @@ INDEX_HTML = r"""<!doctype html>
         if (!response.ok) {
           throw new Error(payload.error || `HTTP ${response.status}`);
         }
+        const sameReport = state.lastPayload?.report === payload.report && $("report").value === payload.report;
         state.lastPayload = payload;
-        render(payload);
+        render(payload, sameReport);
         const when = new Date().toLocaleTimeString();
         setStatus(payload.ok ? t("upToDate") : t("loadedWithNotes"), `${t("lastRefresh")} ${when}`);
         positionInitialPanel(payload.report);

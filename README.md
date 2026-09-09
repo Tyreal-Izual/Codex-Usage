@@ -317,6 +317,12 @@ your reading position. Scrolling or changing the report during initial loading
 cancels this initial positioning; the toolbar remains accessible by scrolling up.
 A floating **Back to limits** button in the bottom-right corner returns to the
 Codex limit card after scrolling down. It appears when that card is available.
+Changed Codex/Claude remaining percentages, Credits balance, and reset counts
+pulse gently once (600 ms) and fade out of a soft highlight over four seconds.
+Only changes to displayed values trigger this cue; initial loads, report/language
+switches, missing values, ages, and countdowns do not. Reduced-motion preferences
+disable the scaling while retaining the highlight. Fast refreshes continue the
+existing effect rather than restarting it.
 
 The web server exposes:
 
