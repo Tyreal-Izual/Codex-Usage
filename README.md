@@ -4,13 +4,14 @@
 
 # Codex & Claude Code Usage Dashboard
 
-A local, dependency-free dashboard for viewing Codex, Claude Code, and
-Isambard service information in one browser page.
+A local, dependency-free dashboard for Codex and Claude Code usage,
+Isambard service status, and Codex Radar benchmarks in one browser page.
 
 The dashboard combines subscription rate-limit windows, local token history,
 model and project breakdowns, daily heatmaps, session rankings, optional
-OpenAI Admin API data, and Isambard service status. It runs with the Python
-standard library and binds to `127.0.0.1` by default.
+OpenAI Admin API data, Isambard service status, and Codex Radar cost–IQ curves
+refreshed every four hours. It uses only the Python standard library and binds
+to `127.0.0.1` by default.
 
 > This repository is maintained as an independent project, not as a
 > synchronised mirror of its upstream. Its **Codex collection and reporting
@@ -25,19 +26,28 @@ tool.
 
 ## Screenshots
 
-Click a thumbnail to open the full-size image. The first five screenshots use
-the desktop layout; the last shows the responsive narrow layout.
+Click a thumbnail to open the full-size image. Refreshed on **2026-09-16**,
+these screenshots show the current interface with illustrative usage, project,
+and service-status data. The Radar chart uses a cached public benchmark snapshot.
+They are feature examples, not live account usage, official ratings, or current
+service-status reports.
 
 <!-- markdownlint-disable MD033 -- HTML keeps the screenshot gallery compact on GitHub. -->
 <p>
-  <a href="img/dashboard/1.png"><img src="img/dashboard/1.png" alt="Overview with Codex and Claude Code rate limits, relative ages, and Isambard status" width="220"></a>
-  <a href="img/dashboard/2.png"><img src="img/dashboard/2.png" alt="Codex usage detail with online limits, model age, and profile statistics" width="220"></a>
-  <a href="img/dashboard/3.png"><img src="img/dashboard/3.png" alt="Claude Code usage detail with rate limits, model age, and local token totals" width="220"></a>
-  <a href="img/dashboard/4.png"><img src="img/dashboard/4.png" alt="Isambard service status and planned-maintenance link" width="220"></a>
-  <a href="img/dashboard/5.png"><img src="img/dashboard/5.png" alt="Full Isambard planned-maintenance schedule" width="220"></a>
-  <a href="img/dashboard/6.png"><img src="img/dashboard/6.png" alt="Responsive narrow overview layout" width="220"></a>
+  <a href="img/dashboard/1.jpg"><img src="img/dashboard/1.jpg" alt="Overview with Codex and Claude Code rate limits, relative ages, and Isambard status" width="220"></a>
+  <a href="img/dashboard/2.jpg"><img src="img/dashboard/2.jpg" alt="Codex usage detail with online limits, model age, and profile statistics" width="220"></a>
+  <a href="img/dashboard/3.jpg"><img src="img/dashboard/3.jpg" alt="Claude Code usage detail with rate limits, model age, and local token totals" width="220"></a>
+  <a href="img/dashboard/4.jpg"><img src="img/dashboard/4.jpg" alt="Isambard service status and planned-maintenance link" width="220"></a>
+  <a href="img/dashboard/5.jpg"><img src="img/dashboard/5.jpg" alt="Full Isambard planned-maintenance schedule" width="220"></a>
+  <a href="img/dashboard/6.jpg"><img src="img/dashboard/6.jpg" alt="Narrow rate-limit layout with the floating Back to limits button" width="220"></a>
+  <a href="img/dashboard/7.jpg"><img src="img/dashboard/7.jpg" alt="Codex Radar cost versus IQ chart with title age and four-hour sync metadata" width="220"></a>
+  <a href="img/dashboard/8.jpg"><img src="img/dashboard/8.jpg" alt="Changed numbers highlighted in Claude Code Models and Codex Models" width="220"></a>
 </p>
 <!-- markdownlint-enable MD033 -->
+
+Images 1–5: overview, Codex detail, Claude Code detail, Isambard status, and
+maintenance. Image 6: mobile layout. Image 7: Radar curves. Image 8: model-value
+change highlights (one frame of the animation).
 
 ## Project Origin and Attribution
 
@@ -50,6 +60,7 @@ The codebase has two clearly separated origins:
 | `codex_claude_usage_web.py` and the combined browser UI | Developed in this project |
 | `claude_usage.py`, `claude_usage_statusline.py`, and `claude_usage_refresher.py` | Developed in this project; independent of `codex_usage.py` |
 | `isambard_status.py`, bilingual UI, dashboard layout, and integration logic | Developed in this project |
+| `codex_radar.py` collector, cache worker, and chart component | Developed in this project; benchmark data comes from [Codex Radar](https://codexradar.com/) |
 
 The upstream project is distributed under the MIT License. Its copyright and
 license notice remain in [LICENCE](LICENCE), alongside Frederick Zou's
@@ -61,12 +72,17 @@ is preserved in [README_OLD.md](README_OLD.md).
 - Combined local overview for Codex rate limits, Claude Code rate limits,
   Isambard status, and Codex/Claude model summaries.
 - Dedicated Codex and Claude Code detail views.
+- Codex Radar combined cost / duration / price versus IQ curves, refreshed by an
+  independent four-hour worker with last-known-good cache fallback.
+- Initial positioning at Codex rate limits and a floating **Back to limits** button.
+- A gentle pulse and four-second highlight for changed limits, balances, reset
+  counts, and model statistics, with reduced-motion support.
 - English and Chinese interface with the language choice retained locally.
 - Compact toolbar with report, language, local-day window, refresh interval,
   auto-refresh, and manual refresh controls.
 - Compact panel headings for Codex reset summaries, online-data age, Claude
-  snapshot state, model-data age, Isambard cache age, and planned-maintenance
-  access. Ages are shown relatively (for example, `Updated <1 min`) when a
+  snapshot state, model-data age, Radar sync age, Isambard cache age, and
+  planned-maintenance access. Ages are shown relatively (for example, `Updated <1 min`) when a
   source provides a timestamp.
 - Primary/5-hour and weekly/7-day limit bars with reset countdowns.
 - Local token totals, model shares, daily heatmaps, and top sessions.
@@ -124,6 +140,13 @@ simultaneous requests and collectors are bounded. A wildcard bind must name an
 accepted hostname explicitly, for example
 `--host 0.0.0.0 --allowed-host 192.0.2.10`; it may expose the dashboard to other
 devices and should be used with care.
+
+### Updating a running dashboard
+
+Stop the old process (`Ctrl-C`), run `git pull --ff-only`, then start
+`python3 codex_claude_usage_web.py` again. Open the newly printed access URL.
+A running process does not reload Python edits automatically, and its previous
+access token is no longer valid after a restart.
 
 ## Claude Code Setup
 
@@ -243,10 +266,14 @@ adjustments.
 
 | View | Main contents | Network |
 | --- | --- | --- |
-| Overview (`all`) | Codex rate limits, Claude Code rate limits, Isambard status, and model summaries | Codex read-only endpoints and public Isambard pages; local data otherwise |
-| Codex Usage (`codex-usage`) | Reset credits, local tokens/models/days/sessions, online profile data, and optional Admin API data | Yes |
+| Overview (`all`) | Codex/Claude limits, Isambard status, model summaries, and Radar curves | Codex read-only endpoints and public Isambard pages; Radar reads its background cache |
+| Codex Usage (`codex-usage`) | Reset credits, local tokens/models/days/sessions, online profile data, Radar curves, and optional Admin API data | Yes; Radar reads its background cache |
 | Claude Code Usage (`claude-usage`) | Local token totals, models, projects, days, sessions, and the saved statusLine snapshot | No |
 | Isambard Service Status (`isambard-status`) | Current service cards and planned maintenance | Public pages, cached locally |
+
+The table describes per-view collection. The independent Radar worker keeps
+its schedule while the server runs, regardless of the selected report or the
+browser auto-refresh switch.
 
 The full planned-maintenance view is available at:
 
@@ -263,12 +290,30 @@ age when cached and a maintenance-window count linking to the full schedule.
 The overview toolbar requests the top 10 ranked rows; API callers can still use
 the `top` query parameter to choose a different limit.
 
-## Local JSON API
+## Navigation and Change Highlights
 
-### Codex Radar benchmark curves
+On opening the Overview or Codex Usage page, the first rendered Codex Online
+Rate Limits card is aligned with the top of the viewport. Later refreshes keep
+your reading position. Scrolling or changing the report during initial loading
+cancels this initial positioning; the toolbar remains accessible by scrolling up.
+A floating **Back to limits** button in the bottom-right corner returns to the
+Codex limit card after scrolling down. It appears when that card is available.
+
+Changed Codex/Claude remaining percentages, Credits balance, and reset counts
+pulse gently once (600 ms) and fade out of a soft highlight over four seconds.
+The Claude Code Models and Codex Models panels use the same effect for per-model
+request/thread counts, tokens, shares, and their total-token/model-count summaries.
+Rows are matched by provider and model name, so reordering alone does not flash.
+
+Only changes to displayed values trigger this cue; initial loads, report/language
+switches, missing values, ages, and countdowns do not. Reduced-motion preferences
+disable the scaling while retaining the highlight. Fast refreshes continue the
+existing effect rather than restarting it.
+
+## Codex Radar benchmark curves
 
 The Overview and Codex Usage views include a full-width **Codex Radar** panel
-immediately below Banked Resets. It shows the community's composite intelligence
+immediately below Codex Reset Credits (banked resets). It shows the community's composite intelligence
 against combined cost, average duration, or average price. The independent
 `codex_radar.py` module owns collection, calculation, caching, and the chart
 component; the web entry point only mounts it and exposes its cached data.
@@ -309,23 +354,7 @@ service owns its in-memory snapshot. No LaunchAgent or Codex scheduled task is
 required. Upstream website interfaces may change; incompatible responses leave
 the last valid cache intact.
 
-### Dashboard endpoints
-
-On opening the Overview or Codex Usage page, the first rendered Codex Online
-Rate Limits card is aligned with the top of the viewport. Later refreshes keep
-your reading position. Scrolling or changing the report during initial loading
-cancels this initial positioning; the toolbar remains accessible by scrolling up.
-A floating **Back to limits** button in the bottom-right corner returns to the
-Codex limit card after scrolling down. It appears when that card is available.
-Changed Codex/Claude remaining percentages, Credits balance, and reset counts
-pulse gently once (600 ms) and fade out of a soft highlight over four seconds.
-The Claude Code Models and Codex Models panels use the same effect for per-model
-request/thread counts, tokens, shares, and their total-token/model-count summaries.
-Rows are matched by provider and model name, so reordering alone does not flash.
-Only changes to displayed values trigger this cue; initial loads, report/language
-switches, missing values, ages, and countdowns do not. Reduced-motion preferences
-disable the scaling while retaining the highlight. Fast refreshes continue the
-existing effect rather than restarting it.
+## Local JSON API
 
 The web server exposes:
 
@@ -401,6 +430,8 @@ troubleshooting guide.
 - Codex reset-credit and online-profile requests are read-only.
 - OpenAI Admin API access is optional and uses documented endpoints.
 - Isambard data comes from public status pages; only parsed cache data is kept.
+- Radar requests only public benchmark metadata, sends no local account or
+  conversation data, and stores its snapshot in a Git-ignored cache file.
 - Individual collectors fail independently so one unavailable source does not
   take down the whole dashboard.
 

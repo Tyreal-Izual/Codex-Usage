@@ -5,11 +5,11 @@
 # Codex 与 Claude Code 用量仪表盘
 
 一个在本机运行、无需第三方依赖的综合仪表盘，用同一个网页查看 Codex、
-Claude Code 用量以及 Isambard 服务信息。
+Claude Code 用量、Isambard 服务信息以及 Codex Radar 模型评测。
 
 仪表盘整合订阅限额窗口、本地 token 历史、模型和项目分布、每日热力图、session
-排行、可选的 OpenAI Admin API 数据，以及 Isambard 服务状态。程序只使用 Python
-标准库，默认仅监听 `127.0.0.1`。
+排行、可选的 OpenAI Admin API 数据、Isambard 服务状态，以及每四小时同步的
+Codex Radar 成本与 IQ 曲线。程序只使用 Python 标准库，默认仅监听 `127.0.0.1`。
 
 > 本仓库现在作为**独立项目**维护，不再将自己定位为与上游同步的传统 fork。
 > 其中，**Codex 用量采集与报告基础派生自
@@ -21,18 +21,25 @@ Claude Code 用量以及 Isambard 服务信息。
 
 ## 页面截图
 
-点击缩略图可查看完整尺寸。前五张使用桌面布局，最后一张展示窄屏响应式布局。
+点击缩略图可查看完整尺寸。截图更新于 **2026-09-16**，由当前版本的真实界面渲染。
+用量、项目和服务状态使用示例数据；Radar 曲线使用公开评测的缓存快照。
+截图用于展示功能，不代表实时账户用量、官方评分或当前服务状态。
 
 <!-- markdownlint-disable MD033 -- 使用 HTML 让 GitHub 截图画廊保持紧凑。 -->
 <p>
-  <a href="img/dashboard/1.png"><img src="img/dashboard/1.png" alt="包含 Codex、Claude Code 限额、相对更新时间和 Isambard 状态的总览" width="220"></a>
-  <a href="img/dashboard/2.png"><img src="img/dashboard/2.png" alt="包含在线限额、模型更新时间和资料统计的 Codex 详情" width="220"></a>
-  <a href="img/dashboard/3.png"><img src="img/dashboard/3.png" alt="包含限额、模型更新时间和本地 token 总量的 Claude Code 详情" width="220"></a>
-  <a href="img/dashboard/4.png"><img src="img/dashboard/4.png" alt="Isambard 服务状态和计划维护入口" width="220"></a>
-  <a href="img/dashboard/5.png"><img src="img/dashboard/5.png" alt="完整的 Isambard 计划维护时间表" width="220"></a>
-  <a href="img/dashboard/6.png"><img src="img/dashboard/6.png" alt="窄屏响应式总览布局" width="220"></a>
+  <a href="img/dashboard/1.jpg"><img src="img/dashboard/1.jpg" alt="包含 Codex、Claude Code 限额、相对更新时间和 Isambard 状态的总览" width="220"></a>
+  <a href="img/dashboard/2.jpg"><img src="img/dashboard/2.jpg" alt="包含在线限额、模型更新时间和资料统计的 Codex 详情" width="220"></a>
+  <a href="img/dashboard/3.jpg"><img src="img/dashboard/3.jpg" alt="包含限额、模型更新时间和本地 token 总量的 Claude Code 详情" width="220"></a>
+  <a href="img/dashboard/4.jpg"><img src="img/dashboard/4.jpg" alt="Isambard 服务状态和计划维护入口" width="220"></a>
+  <a href="img/dashboard/5.jpg"><img src="img/dashboard/5.jpg" alt="完整的 Isambard 计划维护时间表" width="220"></a>
+  <a href="img/dashboard/6.jpg"><img src="img/dashboard/6.jpg" alt="窄屏在线限额布局和右下角返回按钮" width="220"></a>
+  <a href="img/dashboard/7.jpg"><img src="img/dashboard/7.jpg" alt="Codex Radar 成本与 IQ 曲线、标题更新时间和每四小时同步信息" width="220"></a>
+  <a href="img/dashboard/8.jpg"><img src="img/dashboard/8.jpg" alt="Claude Code Models 和 Codex Models 中变化数值的淡高亮" width="220"></a>
 </p>
 <!-- markdownlint-enable MD033 -->
+
+图 1–5：总览、Codex 详情、Claude Code 详情、Isambard 状态和维护计划；
+图 6：手机布局；图 7：Radar 曲线；图 8：模型数值变化提示（动画中的一帧）。
 
 ## 项目来源与署名
 
@@ -45,6 +52,7 @@ Claude Code 用量以及 Isambard 服务信息。
 | `codex_claude_usage_web.py` 与综合网页界面 | 本项目实现 |
 | `claude_usage.py`、`claude_usage_statusline.py` 与 `claude_usage_refresher.py` | 本项目独立实现，不向 `codex_usage.py` 写入 Claude 逻辑 |
 | `isambard_status.py`、中英文界面、页面布局与整合逻辑 | 本项目实现 |
+| `codex_radar.py` 的采集、缓存与图表组件 | 本项目实现；评测数据来自 [Codex Radar](https://codexradar.com/) |
 
 上游项目采用 MIT License。原作者的版权和许可声明与 Frederick Zou 对本项目新增内容的
 版权声明均保留在 [LICENCE](LICENCE) 中；上游 CLI 的原始说明保留在
@@ -55,11 +63,14 @@ Claude Code 用量以及 Isambard 服务信息。
 - Codex 限额、Claude Code 限额、Isambard 状态，以及 Codex/Claude 模型摘要的
   本地综合总览。
 - 独立的 Codex 与 Claude Code 详情页面。
+- Codex Radar 综合成本 / 耗时 / 费用 × IQ 曲线，独立后台每四小时同步，失败保留缓存。
+- 首次打开自动定位到 Codex 在线限额卡片，右下角提供“返回在线限额”悬浮按钮。
+- 变化数值轻微弹动一次并高亮四秒，覆盖限额、余额、重置次数和模型统计，支持减少动态效果。
 - 中英文界面，并在本地记住语言选择。
 - 紧凑工具栏，保留报告、语言、本地天数、刷新间隔、自动刷新和手动刷新控件。
 - 紧凑卡片标题，在标题区域显示 Codex 重置摘要、在线数据更新时间、Claude 快照
-  状态、模型数据年龄、Isambard 缓存时长和计划维护入口。数据源提供时间戳时，年龄会
-  以相对时间显示，例如 `更新时间 少于 1 分钟`。
+  状态、模型数据年龄、Radar 同步年龄、Isambard 缓存时长和计划维护入口。
+  数据源提供时间戳时，以相对时间显示，例如 `更新时间 少于 1 分钟`。
 - Primary/5 小时和 Weekly/7 天限额条及 reset 倒计时。
 - 本地 token 总量、模型占比、每日热力图和最高用量 session。
 - Claude Code input、output、cache creation 和 cache read token 统计，并按
@@ -107,6 +118,12 @@ python3 codex_claude_usage_web.py --host 127.0.0.1 --port 8765
 默认监听地址有意限制为本机。服务会校验 Host，数据 API 要求每次启动时生成的访问
 凭据，并限制并发请求与数据采集数量。通配监听必须明确指定允许的主机名，例如
 `--host 0.0.0.0 --allowed-host 192.0.2.10`；这可能让其他设备访问仪表盘，请谨慎使用。
+
+### 更新已运行的仪表盘
+
+停止旧进程（`Ctrl-C`），运行 `git pull --ff-only`，再执行
+`python3 codex_claude_usage_web.py`。重启后使用新打印的访问链接；旧进程不会自动
+载入 Python 文件改动，旧访问令牌也不会继续有效。
 
 ## Claude Code 设置
 
@@ -207,10 +224,13 @@ Anthropic 提供的后台用量 API，因此未来的 Claude Code 版本可能�
 
 | 页面 | 主要内容 | 网络请求 |
 | --- | --- | --- |
-| 总览（`all`） | Codex 限额、Claude Code 限额、Isambard 状态和模型摘要 | Codex 只读接口与 Isambard 公开页面；其他为本地数据 |
-| Codex 用量（`codex-usage`） | Reset credits、本地 token/模型/每日/session、在线 profile，以及可选 Admin API 数据 | 是 |
+| 总览（`all`） | Codex / Claude 限额、Isambard 状态、模型摘要和 Radar 曲线 | Codex 只读接口与 Isambard 公开页面；Radar 读取后台缓存 |
+| Codex 用量（`codex-usage`） | Reset credits、本地 token/模型/每日/session、在线 profile、Radar 曲线，以及可选 Admin API 数据 | 是；Radar 读取后台缓存 |
 | Claude Code 用量（`claude-usage`） | 本地 token、模型、项目、每日、session 和保存的 statusLine 快照 | 否 |
 | Isambard 服务状态（`isambard-status`） | 当前服务卡片和计划维护 | 公开页面，本地缓存 |
+
+表中描述当前视图的数据采集；独立 Radar 后台任务在服务器运行期间保持定时同步，
+不受报告选择或浏览器自动刷新开关影响。
 
 完整计划维护页面：
 
@@ -225,11 +245,24 @@ Isambard 主卡片会把来源元数据保持在紧凑状态：使用缓存时�
 提供维护窗口数量和完整计划入口。总览工具栏固定请求排行前 10 行；通过 JSON API 调用时，
 仍可使用 `top` 参数指定其他数量。
 
-## 本地 JSON API
+## 导航与数值变化提示
 
-### Codex Radar 评测曲线
+打开总览或 Codex 用量页时，首次加载后自动将 Codex 在线限额卡片定位到视口顶部。
+后续刷新保留阅读位置；加载期间主动滚动或切换报告会取消首次定位。
+工具栏仍可通过向上滚动访问。
+右下角的“返回在线限额”悬浮按钮可在向下浏览后快速回到 Codex 限额卡片，
+仅在当前页面包含该卡片时显示。
 
-总览和 Codex 用量页会在 Banked Resets 下方显示独占一行的 **Codex Radar** 面板，
+Codex / Claude 剩余百分比、Credits 余额和重置次数在显示值变化时，数字会轻微放大一次
+（600 毫秒），并在四秒内淡出高亮。首次加载、报告或语言切换、缺失值、age 和倒计时
+不会触发。系统开启“减少动态效果”时仅保留高亮；快速刷新会延续效果，不会重复弹动。
+Claude Code Models 和 Codex Models 中每个模型的请求/任务数、token 数、占比，以及
+面板汇总的总 token 和模型数量，也使用相同效果。前后按平台和模型名称匹配，
+仅调整排行顺序不会误闪。
+
+## Codex Radar 评测曲线
+
+总览和 Codex 用量页会在 Codex 重置额度（Banked Resets）下方显示独占一行的 **Codex Radar** 面板，
 可切换综合成本、平均耗时、平均费用与综合 IQ 的关系。独立的 `codex_radar.py`
 负责采集、计算、缓存和图表组件，网页入口只负责挂载组件及提供缓存接口。
 标题旁的“更新”徽标显示距上次成功同步的时间；悬停可查看同步和源数据的精确时间。
@@ -262,19 +295,7 @@ python3 codex_radar.py --cache /tmp/radar.json
 不需要另装 LaunchAgent 或创建 Codex 定时任务。源站接口变化导致数据不兼容时，
 模块会保留最后一份有效缓存。
 
-### 仪表盘接口
-
-打开总览或 Codex 用量页时，首次加载后自动将 Codex 在线限额卡片定位到视口顶部。
-后续刷新保留阅读位置；加载期间主动滚动或切换报告会取消首次定位。
-工具栏仍可通过向上滚动访问。
-右下角的“返回在线限额”悬浮按钮可在向下浏览后快速回到 Codex 限额卡片，
-仅在当前页面包含该卡片时显示。
-Codex / Claude 剩余百分比、Credits 余额和重置次数在显示值变化时，数字会轻微放大一次
-（600 毫秒），并在四秒内淡出高亮。首次加载、报告或语言切换、缺失值、age 和倒计时
-不会触发。系统开启“减少动态效果”时仅保留高亮；快速刷新会延续效果，不会重复弹动。
-Claude Code Models 和 Codex Models 中每个模型的请求/任务数、token 数、占比，以及
-面板汇总的总 token 和模型数量，也使用相同效果。前后按平台和模型名称匹配，
-仅调整排行顺序不会误闪。
+## 本地 JSON API
 
 网页服务提供：
 
@@ -346,6 +367,7 @@ python3 codex_usage.py export --report all --format json
 - Codex reset-credit 和在线 profile 请求均为只读。
 - OpenAI Admin API 是可选功能，并使用公开文档接口。
 - Isambard 数据来自公开状态页，本地只保存解析后的缓存。
+- Radar 只请求公开评测元数据，不发送本地账户或对话信息；缓存文件已被 Git 忽略。
 - 各采集器独立处理错误，单个来源不可用不会使整个网页停止工作。
 
 上游派生的 Codex 采集器使用了部分未公开的 Codex 订阅接口，这些接口未来可能变化。

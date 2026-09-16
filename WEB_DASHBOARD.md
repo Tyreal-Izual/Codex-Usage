@@ -114,10 +114,17 @@ python3 codex_claude_usage_web.py --host 0.0.0.0 --allowed-host 192.0.2.10
 | `Refresh Seconds` | 控制自动刷新间隔 |
 | `Auto Refresh` | 开启或关闭自动刷新 |
 | `Refresh` | 立即手动刷新一次 |
+| `返回在线限额` | 右下角悬浮按钮；当前页面有 Codex 在线限额卡片时显示，点击即可回到卡片顶部 |
+
+首次打开总览或 Codex 用量页会自动定位到在线限额卡片；后续刷新保留阅读位置。
+限额、余额、重置次数与两个 Models 面板中的数值变化时，会轻微弹动一次并高亮四秒。
+首次加载、语言/报告切换、age 和倒计时不触发；模型排行换位也不会误闪。
+“减少动态效果”启用时仅保留高亮。
 
 ## Isambard 服务状态与计划维护
 
-总览的固定顺序是 `Codex Online Rate Limits` 在第一位、`Isambard Service Status` 在第二位。
+总览依次显示 `Codex Online Rate Limits`、`Claude Code Rate Limits` 和
+`Isambard Service Status`，然后展示两个 Models 面板、重置额度及 Radar 曲线。
 Isambard 面板标题行会显示缓存时长（如适用）和可点击的 **计划维护** 入口，不再显示抓取
 时间或数据来源；入口会打开：
 
@@ -139,7 +146,8 @@ http://127.0.0.1:8765/isambard-maintenance
 无需浏览器保持打开，但需要网页服务器运行；休眠结束后重新检查到期时间。
 完整口径、命令和缓存说明见 [README.zh-CN.md](README.zh-CN.md#codex-radar-评测曲线)。
 
-当前总览页面主要包含：
+以下列出总览和各详情页提供的区域；完整 token、项目、session、每日用量和 profile
+统计位于对应详情页，总览集中显示限额、服务状态、模型摘要、重置额度和 Radar：
 
 | 区域 | 说明 |
 | --- | --- |
@@ -151,6 +159,7 @@ http://127.0.0.1:8765/isambard-maintenance
 | `Codex Reset Credits` | 本地可读的 reset credits 信息 |
 | `Codex Local Token Totals` | 从本地 session 文件统计出的 token 总量 |
 | `Codex Models` | 从本地 thread 数据库按模型聚合，包含堆叠条形图、颜色标识和占比 |
+| `Codex Radar` | 总览和 Codex 详情中的成本 / 耗时 / 费用 × IQ 曲线、同步年龄、四小时后台更新与缓存回退 |
 | `Codex Profile Statistics` | 在线 profile 统计信息 |
 | `Codex Daily Local Usage` | 类似 GitHub contributions 的本地每日用量热力图 |
 | `Codex Top Sessions` | 本地 token 计数最高的 session 文件 |
