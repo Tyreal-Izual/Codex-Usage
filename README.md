@@ -27,7 +27,7 @@ tool.
 ## Screenshots
 
 Click a thumbnail to open the full-size image. Refreshed on **2026-09-16**,
-these screenshots show the current interface with illustrative usage, project,
+these screenshots show the interface with illustrative usage, project,
 and service-status data. The Radar chart uses a cached public benchmark snapshot.
 They are feature examples, not live account usage, official ratings, or current
 service-status reports.
@@ -313,27 +313,44 @@ existing effect rather than restarting it.
 ## Codex Radar benchmark curves
 
 The Overview and Codex Usage views include a full-width **Codex Radar** panel
-immediately below Codex Reset Credits (banked resets). It shows the community's composite intelligence
-against combined cost, average duration, or average price. The independent
+immediately below Codex Reset Credits (banked resets). It shows community
+benchmark scores against combined cost, duration, or cost. It defaults to **GPT-6 Astra / Sol / Luna**,
+with a GPT-5 group and separate composite, software-engineering, and visual-spatial
+views. Each view includes score cards and curves. The independent
 `codex_radar.py` module owns collection, calculation, caching, and the chart
 component; the web entry point only mounts it and exposes its cached data.
 The title's Updated badge shows time since the last successful local sync;
 hover over it for the exact sync and source-data timestamps.
 
 While the dashboard server is running, a background worker checks the two public
-Codex Radar JSON sources every four hours, even with the browser closed. The
-first run fetches immediately; a restart reuses a fresh disk cache. Sleep or
+benchmark sources and the optional distinct-task coverage endpoint every four
+hours, even with the browser closed. The first run fetches immediately; a restart reuses a fresh disk cache. Sleep or
 offline time can delay updates. Failed refreshes retain the last successful
 snapshot and retry after 15, 30, 60, 120, then at most 240 minutes. The panel
 distinguishes source-data time from local sync time and marks stale results.
 
-IQ, price, and duration use the source site's valid-task-weighted composite of
-software engineering and visual-spatial results. Cost is proportional to
-`price * (minutes / 10) ** (log(2.5) / log(1.35))`, normalized so the largest
-composite cost is 100. The horizontal axis is logarithmic, with a marked
-compressed gap when the smallest value is far below the rest. Only configurations
-with both components and complete measured metrics are plotted. These are
-community benchmark scores, not account usage or official OpenAI ratings.
+The calculation follows Codex Radar's 2026-09-26 display rules:
+
+- GPT-6 Sol/Luna need 30 valid software samples for composite IQ. Visual results
+  contribute only with 30 valid samples of their own; otherwise the score is
+  explicitly marked **Software only**. Missing scores are never treated as zero.
+- Astra and GPT-5 composite scores still require both components. Individual
+  benchmark views remain available independently.
+- Sample counts and distinct-task coverage are separate. Coverage below 60% is
+  flagged; a failed coverage request is shown as unknown without blocking score
+  updates. Quality information describes the last local snapshot.
+- Source costs may be medians; composite costs are weighted by sample counts.
+  They are no longer all labelled as average prices.
+- Cost is proportional to `price * (minutes / 10) ** (log(2.5) / log(1.35))`.
+  The largest cost **within the selected generation and benchmark** is 100;
+  these indexes are not absolute cross-generation prices.
+- A valid IQ remains visible on its card when cost or duration is missing;
+  invalid coordinates are omitted from the corresponding curve.
+
+The horizontal axis remains logarithmic, with a marked compressed gap where
+needed. Legacy caches refresh on startup; failed upgrades retain a stale-marked
+snapshot and back off before retrying. Scores are community benchmarks, not
+account usage or official ratings.
 
 The authenticated `GET /api/codex-radar` endpoint only reads memory; it never
 starts an upstream fetch. Browser refresh controls do not override the four-hour

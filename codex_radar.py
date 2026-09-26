@@ -2,7 +2,7 @@
 """Codex Radar collector, four-hour cache worker, and standalone dashboard widget.
 
 Only public benchmark metadata is requested. No account or transcript data is
-sent. The composite calculation follows https://codexradar.com/ (2026-09-07).
+sent. The composite calculation follows https://codexradar.com/ (2026-09-26).
 Run this file directly to update the cache once; the web server owns the worker.
 """
 
@@ -25,17 +25,23 @@ from urllib.request import Request, urlopen
 SOURCE_URL = "https://codexradar.com/"
 METRICS_URL = SOURCE_URL + "api/intelligence-efficiency-metrics"
 VISUAL_URL = SOURCE_URL + "api/visual-spatial-reasoning"
+COVERAGE_URL = SOURCE_URL + "api/intelligence-efficiency-coverage"
+CACHE_VERSION = 2
 REFRESH_SECONDS = 4 * 60 * 60
 RETRY_SECONDS = 15 * 60
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 DEFAULT_CACHE_PATH = Path(__file__).resolve().with_name("codex_radar_snapshot.json")
 MODEL_NAMES = {
-    "gpt-6-astra": "Astra",
-    "gpt-5.6-sol": "Sol",
-    "gpt-5.6-terra": "Terra",
-    "gpt-5.6-luna": "Luna",
-    "gpt-5.5": "5.5",
+    "gpt-6-astra": "GPT-6 Astra",
+    "gpt-6-sol": "GPT-6 Sol",
+    "gpt-6-luna": "GPT-6 Luna",
+    "gpt-5.6-sol": "GPT-5.6 Sol",
+    "gpt-5.6-terra": "GPT-5.6 Terra",
+    "gpt-5.6-luna": "GPT-5.6 Luna",
+    "gpt-5.5": "GPT-5.5",
 }
+NEW_GPT6 = frozenset({"gpt-6-sol", "gpt-6-luna"})
+MIN_SAMPLES = 30
 EFFORTS = ("low", "medium", "high", "xhigh", "max", "ultra")
 COST_WEIGHT = math.log(2.5) / math.log(1.35)
 
@@ -83,6 +89,11 @@ def fetch_json(url: str) -> dict[str, Any]:
         cache_status = response.headers.get("X-Codex-Cache", "")
         if not cache_status or cache_status.startswith("STALE") or cache_status == "ERROR":
             raise ValueError("Radar upstream is not serving a current snapshot")
+        if url == COVERAGE_URL:
+            age = float(response.headers.get("X-Codex-Cache-Age", "nan"))
+            fetched = float(response.headers.get("X-Codex-Fetched-At", "nan"))
+            if not math.isfinite(age) or not 0 <= age < 300 or not math.isfinite(fetched) or fetched <= 0:
+                raise ValueError("Radar task coverage cache age is unknown or expired")
         raw = response.read(MAX_RESPONSE_BYTES + 1)
     if len(raw) > MAX_RESPONSE_BYTES:
         raise ValueError("Radar response exceeds the size limit")
@@ -92,7 +103,7 @@ def fetch_json(url: str) -> dict[str, Any]:
     return value
 
 
-def component_points(payload: dict[str, Any], *, software: bool) -> dict[tuple[str, str], dict[str, float]]:
+def component_points(payload: dict[str, Any], *, software: bool) -> dict[tuple[str, str], dict[str, Any]]:
     if software:
         if (payload.get("schema"), payload.get("mode")) not in {
             (3, "equal_latest_3"), (2, "weighted_latest_3"),
@@ -117,92 +128,180 @@ def component_points(payload: dict[str, Any], *, software: bool) -> dict[tuple[s
             continue
         fields = {key: finite_number(row.get(key)) for key in
                   ("iq", "average_price_usd", "average_minutes", weight_field)}
-        # A configuration without all three measured metrics cannot be plotted.
-        if any(row.get(key) is None for key in fields):
-            continue
-        if any(value is None for value in fields.values()):
+        if any(row.get(key) is not None and fields[key] is None for key in fields):
             raise ValueError("Non-finite Radar metric")
-        if not 0 <= fields["iq"] <= 150 or any(fields[key] < 0 for key in fields if key != "iq"):
+        if fields["iq"] is None or fields[weight_field] is None:
+            continue
+        if not 0 <= fields["iq"] <= 150 or any(
+            fields[key] is not None and fields[key] < 0 for key in fields if key != "iq"
+        ):
             raise ValueError("Radar metric outside its valid range")
         if fields[weight_field] == 0:
             continue
         key = (model, effort)
         if key in out:
             raise ValueError("Duplicate Radar model/effort")
-        out[key] = {**fields, "weight": fields[weight_field]}
+        out[key] = {**fields, "weight": fields[weight_field],
+                    "benchmark_tasks": finite_number(row.get("benchmark_tasks")),
+                    "price_aggregation": row.get("price_aggregation") if row.get("price_aggregation") in ("median", "mean") else "unknown"}
+
     return out
 
 
-def combine_snapshots(software: dict[str, Any], visual: dict[str, Any]) -> dict[str, Any]:
-    """Reproduce the site's valid-task weighted composite, then normalize costs.
+def normalize_costs(points: list[dict[str, Any]]) -> None:
+    """Normalize independently within GPT-6 and GPT-5, as the upstream tabs do."""
+    for prefix in ("gpt-6-", "gpt-5."):
+        group = [p for p in points if p["model"].startswith(prefix)]
+        logs = {}
+        for index, point in enumerate(group):
+            price, minutes = point["average_price_usd"], point["average_minutes"]
+            point["combined_cost_index"] = None
+            if price is not None and minutes is not None and price > 0 and minutes > 0:
+                logs[index] = math.log(price) + COST_WEIGHT * (math.log(minutes) - math.log(10))
+        if logs:
+            largest = max(logs.values())
+            for index, cost in logs.items():
+                group[index]["combined_cost_index"] = math.exp(cost - largest) * 100
 
-    The API's software combined_cost_index is not the composite chart's x value.
-    Cost is proportional to price * (minutes / 10) ** log(2.5)/log(1.35).
-    Log-space arithmetic avoids overflow; normalizing the largest to 100 removes
-    the common factor. Only configurations present in both sources participate.
+
+def coverage_points(payload: dict[str, Any]) -> dict[tuple[str, str], tuple[int, int]]:
+    if (payload.get("schema") != 1 or payload.get("benchmark_id") != "deep-swe"
+            or payload.get("coverage_mode") != "distinct-task-selected-n-v1"):
+        raise ValueError("Unsupported Radar task coverage schema")
+    total = payload.get("total_tasks")
+    if type(total) is not int or total <= 0 or not isinstance(payload.get("points"), list):
+        raise ValueError("Invalid Radar task coverage")
+    source_time(payload.get("latest_graded_at"))
+    result = {}
+    for row in payload["points"]:
+        if not isinstance(row, dict):
+            raise ValueError("Invalid Radar task coverage row")
+        model, effort, covered = row.get("model"), row.get("effort"), row.get("covered_tasks")
+        if not isinstance(model, str) or not isinstance(effort, str):
+            raise ValueError("Invalid coverage identity")
+        if model not in MODEL_NAMES or effort not in EFFORTS:
+            continue
+        key = (model, effort)
+        if type(covered) is not int or not 0 <= covered <= total or key in result:
+            raise ValueError("Invalid or duplicate task coverage")
+        result[key] = (covered, total)
+    return result
+
+
+def combine_snapshots(software: dict[str, Any], visual: dict[str, Any],
+                      coverage: dict[tuple[str, str], tuple[int, int]] | None = None) -> dict[str, Any]:
+    """Mirror the current source's composite eligibility and generation tabs.
+
+    New Sol/Luna need 30 software samples; visual contributes only with 30 of
+    its own. Astra and GPT-5 retain the two-component rule. Missing components
+    are omitted, never treated as zero. Price input may be a median despite the
+    upstream field's legacy average_price_usd name.
     """
     software_at = source_time(software.get("source_updated_at"))
     visual_at = source_time(visual.get("source_updated_at"))
     left = component_points(software, software=True)
     right = component_points(visual, software=False)
-    points = []
-    log_costs = []
+    coverage = coverage or {}
+    views = {name: {"points": []} for name in ("comprehensive", "software", "visual")}
+    samples = []
     for model in MODEL_NAMES:
         for effort in EFFORTS:
-            a, b = left.get((model, effort)), right.get((model, effort))
-            if a is None or b is None:
+            key = (model, effort)
+            a, b = left.get(key), right.get(key)
+            if a is None and b is None:
                 continue
-            total = a["weight"] + b["weight"]
-            point = {"model": model, "effort": effort}
-            for field in ("iq", "average_price_usd", "average_minutes"):
-                point[field] = a[field] * (a["weight"] / total) + b[field] * (b["weight"] / total)
-            # A zero component cost is legitimate when the weighted composite
-            # remains positive. Only the final logarithmic coordinates need > 0.
-            if point["average_price_usd"] <= 0 or point["average_minutes"] <= 0:
+            software_n, visual_n = (a["weight"] if a else 0), (b["weight"] if b else 0)
+            covered, total = coverage.get(key, (None, None))
+            samples.append({"model": model, "effort": effort, "software_samples": software_n,
+                            "visual_samples": visual_n, "software_covered_tasks": covered,
+                            "software_benchmark_tasks": total,
+                            "visual_benchmark_tasks": b.get("benchmark_tasks") if b else None})
+            meta = samples[-1]
+            for mode, component in (("software", a), ("visual", b)):
+                if component is None or (model in NEW_GPT6 and component["weight"] < MIN_SAMPLES):
+                    continue
+                views[mode]["points"].append({**meta, "iq": component["iq"],
+                    "average_price_usd": component["average_price_usd"], "average_minutes": component["average_minutes"],
+                    "price_aggregation": component["price_aggregation"], "score_basis": mode})
+            if a is None or (model in NEW_GPT6 and software_n < MIN_SAMPLES):
                 continue
-            point.update(software_iq=a["iq"], visual_iq=b["iq"],
-                         software_samples=a["weight"], visual_samples=b["weight"])
-            log_costs.append(math.log(point["average_price_usd"]) + COST_WEIGHT * math.log(point["average_minutes"] / 10))
-            points.append(point)
-    if not points:
-        raise ValueError("No Radar configurations have both software and visual metrics")
-    largest = max(log_costs)
-    for point, cost in zip(points, log_costs):
-        point["combined_cost_index"] = math.exp(cost - largest) * 100
-        if point["combined_cost_index"] <= 0:
-            raise ValueError("Radar cost is too small to plot")
-    return {
-        "source_url": SOURCE_URL,
-        "source_updated_at": min(software_at, visual_at).isoformat(),
-        "software_updated_at": software_at.isoformat(),
-        "visual_updated_at": visual_at.isoformat(),
-        "points": points,
-    }
+            use_visual = b is not None and (model not in NEW_GPT6 or visual_n >= MIN_SAMPLES)
+            if not use_visual and model not in NEW_GPT6:
+                continue
+            chosen = [a, b] if use_visual else [a]
+            def weighted(field):
+                measured = [c for c in chosen if c[field] is not None]
+                if model not in NEW_GPT6 and len(measured) != len(chosen):
+                    return None
+                weight = sum(c["weight"] for c in measured)
+                if not math.isfinite(weight):
+                    raise ValueError("Radar sample weights exceed the numeric range")
+                return sum(c[field] * (c["weight"] / weight) for c in measured) if weight else None
+            views["comprehensive"]["points"].append({**meta,
+                **{field: weighted(field) for field in ("iq", "average_price_usd", "average_minutes")},
+                "software_iq": a["iq"], "visual_iq": b["iq"] if use_visual else None,
+                "visual_included": use_visual, "score_basis": "comprehensive" if use_visual else "software",
+                "price_aggregation": "weighted"})
+    if not samples:
+        raise ValueError("No Radar configurations have usable benchmark scores")
+    for mode, view in views.items():
+        normalize_costs(view["points"])
+        view["source_updated_at"] = (software_at if mode == "software" else visual_at if mode == "visual"
+                                     else min(software_at, visual_at)).isoformat()
+    return {"source_url": SOURCE_URL, "source_updated_at": min(software_at, visual_at).isoformat(),
+            "software_updated_at": software_at.isoformat(), "visual_updated_at": visual_at.isoformat(),
+            "points": views["comprehensive"]["points"], "views": views, "samples": samples}
 
 
-def validate_snapshot(snapshot: Any) -> bool:
+def validate_snapshot(snapshot: Any, *, legacy: bool = False) -> bool:
     try:
         source_time(snapshot["source_updated_at"])
-        points = snapshot["points"]
-        if not isinstance(points, list) or not points or len(points) > 30:
+        views = {"comprehensive": {"points": snapshot["points"]}} if legacy else snapshot["views"]
+        if not isinstance(views, dict) or (not legacy and set(views) != {"comprehensive", "software", "visual"}):
             return False
-        seen = set()
-        for point in points:
-            key = (point["model"], point["effort"])
-            if key[0] not in MODEL_NAMES or key[1] not in EFFORTS or key in seen:
+        count = 0
+        for view in views.values():
+            points = view["points"]
+            if not isinstance(points, list) or len(points) > len(MODEL_NAMES) * len(EFFORTS):
                 return False
-            seen.add(key)
-            for field in ("iq", "software_iq", "visual_iq", "average_price_usd",
-                          "average_minutes", "combined_cost_index"):
-                number = finite_number(point.get(field))
-                if number is None:
+            count += len(points)
+            seen = set()
+            for point in points:
+                key = (point["model"], point["effort"])
+                if key[0] not in MODEL_NAMES or key[1] not in EFFORTS or key in seen:
                     return False
-                if field.endswith("iq") and not 0 <= number <= 150:
+                seen.add(key)
+                iq = finite_number(point.get("iq"))
+                if iq is None or not 0 <= iq <= 150:
                     return False
-                if not field.endswith("iq") and number <= 0:
+                for field in ("average_price_usd", "average_minutes", "combined_cost_index"):
+                    value = point.get(field)
+                    if value is not None:
+                        number = finite_number(value)
+                        if number is None or number < 0 or (field == "combined_cost_index" and number > 100.000001):
+                            return False
+        if legacy:
+            return count > 0
+        if snapshot["points"] != views["comprehensive"]["points"]:
+            return False
+        samples = snapshot["samples"]
+        if not isinstance(samples, list) or not 0 < len(samples) <= len(MODEL_NAMES) * len(EFFORTS):
+            return False
+        identities = set()
+        for row in samples:
+            key = (row["model"], row["effort"])
+            if key[0] not in MODEL_NAMES or key[1] not in EFFORTS or key in identities:
+                return False
+            identities.add(key)
+            for field in ("software_samples", "visual_samples"):
+                value = finite_number(row.get(field))
+                if value is None or value < 0:
                     return False
-                if field == "combined_cost_index" and number > 100.000001:
-                    return False
+        for view in views.values():
+            source_time(view["source_updated_at"])
+            if any((point["model"], point["effort"]) not in identities for point in view["points"]):
+                return False
+        json.dumps(snapshot, allow_nan=False)
         return True
     except (KeyError, TypeError, ValueError):
         return False
@@ -245,15 +344,20 @@ class RadarService:
             # correctly rejects them. Reject corrupt metadata here as well, so
             # retaining a failed attempt cannot crash the background worker.
             json.dumps(state, allow_nan=False)
-            if isinstance(state, dict) and state.get("schema_version") == 1:
+            if isinstance(state, dict) and state.get("schema_version") in (1, CACHE_VERSION):
                 snapshot = state.get("snapshot")
                 fetched = finite_number(state.get("fetched_at_epoch"))
-                if snapshot is None or (validate_snapshot(snapshot) and fetched is not None and 0 < fetched <= now + 60):
+                if snapshot is None or (validate_snapshot(snapshot, legacy=state["schema_version"] == 1 or state.get("legacy_snapshot") is True) and fetched is not None and 0 < fetched <= now + 60):
                     self._state = state
+                    if snapshot is not None and (state["schema_version"] == 1 or state.get("legacy_snapshot") is True):
+                        normalize_costs(snapshot["points"])
                     if snapshot is None:
                         self._state.pop("fetched_at_epoch", None)
         except (OSError, ValueError):
             pass
+        if self._state.get("schema_version") == 1:
+            self._state["next_attempt_at_epoch"] = now
+            self._state["last_error"] = "Updating the legacy Radar snapshot to the current benchmark rules."
         # An invalid timestamp must never postpone initial recovery indefinitely.
         next_at = finite_number(self._state.get("next_attempt_at_epoch"))
         if next_at is None or not 0 < next_at <= now + REFRESH_SECONDS:
@@ -291,7 +395,15 @@ class RadarService:
                 previous = copy.deepcopy(self._state)
                 self._refreshing = True
             try:
-                data = combine_snapshots(self._fetcher(METRICS_URL), self._fetcher(VISUAL_URL))
+                software = self._fetcher(METRICS_URL)
+                visual = self._fetcher(VISUAL_URL)
+                coverage, coverage_warning = {}, None
+                try:
+                    coverage = coverage_points(self._fetcher(COVERAGE_URL))
+                except Exception:
+                    coverage_warning = "Independent software task coverage is unavailable."
+                data = combine_snapshots(software, visual, coverage)
+                data["coverage_warning"] = coverage_warning
                 if not validate_snapshot(data):
                     raise ValueError("Invalid composite Radar snapshot")
                 finished = self._clock()
@@ -304,7 +416,9 @@ class RadarService:
                 state = {**previous, "failures": failures,
                          "last_error": f"{type(exc).__name__}: {exc}"[:300],
                          "next_attempt_at_epoch": self._clock() + delay}
-            state.update(schema_version=1, last_attempt_at_epoch=now)
+            if state.get("snapshot") is not None and "views" not in state["snapshot"]:
+                state["legacy_snapshot"] = True
+            state.update(schema_version=CACHE_VERSION, last_attempt_at_epoch=now)
             state.pop("cache_warning", None)
             try:
                 atomic_write(self.cache_path, state)
@@ -339,6 +453,19 @@ class RadarService:
 
 
 STYLE = r"""
+    .radar-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+    .radar-tabs button { background: var(--field); color: var(--muted); border: 1px solid var(--line); min-height: 44px; }
+    .radar-tabs button[aria-pressed="true"] { background: var(--accent-soft); color: var(--ink); border-color: var(--accent); }
+    .radar-family { margin: 14px 0; }
+    .radar-family h3 { margin: 0 0 8px; font-size: 14px; }
+    .radar-scores { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; }
+    .radar-score { min-width: 0; padding: 10px; border: 1px solid var(--line); border-top: 3px solid var(--series-color); background: var(--field); color: var(--ink); text-align: left; border-radius: 7px; }
+    .radar-score strong { display: block; font-size: 24px; }
+    .radar-score small { display: block; color: var(--muted); font-size: 11px; }
+    .radar-score .radar-quality { color: var(--warn); }
+    .radar-score:focus-visible, .radar-tabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    @media (max-width: 900px) { .radar-scores { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+    @media (max-width: 600px) { .radar-scores { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
     .radar-toolbar, .radar-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
     .radar-toolbar { justify-content: space-between; margin-bottom: 10px; }
     .radar-toolbar label { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
@@ -368,13 +495,20 @@ STYLE = r"""
 SCRIPT = r"""
     const CodexRadar = (() => {
       const models = {
-        "gpt-6-astra": ["Astra", "#f97316"], "gpt-5.6-sol": ["Sol", "#eab308"],
-        "gpt-5.6-terra": ["Terra", "#60a5fa"], "gpt-5.6-luna": ["Luna", "#c7d2e0"],
-        "gpt-5.5": ["5.5", "#00e5ff"]
+        "gpt-6-astra": ["GPT-6 Astra", "#f97316"],
+        "gpt-6-sol": ["GPT-6 Sol", "#facc15"], "gpt-6-luna": ["GPT-6 Luna", "#a5b4fc"],
+        "gpt-5.6-sol": ["GPT-5.6 Sol", "#eab308"],
+        "gpt-5.6-terra": ["GPT-5.6 Terra", "#60a5fa"], "gpt-5.6-luna": ["GPT-5.6 Luna", "#c7d2e0"],
+        "gpt-5.5": ["GPT-5.5", "#00e5ff"]
       };
       const efforts = ["low", "medium", "high", "xhigh", "max", "ultra"];
       const words = {
-        en: { title: "Codex Radar", subtitle: "Composite intelligence · Cost × IQ", metric: "Metric",
+        en: { comprehensive: "Composite", software: "Software engineering", visual: "Visual-spatial",
+          coverage: "distinct tasks", generation: "Model generation", benchmark: "Benchmark", insufficient: "Insufficient data", softwareOnly: "Software only",
+          lowCoverage: "Task coverage <60%", unknownCoverage: "Coverage unavailable", samples: "Samples SWE / visual",
+          noPlot: "No plottable values for this metric in this group.", median: "Median cost", mean: "Mean cost", weighted: "Weighted cost", unknown: "Cost",
+          threshold: "GPT-6 Sol/Luna need 30 valid software samples for composite IQ. Visual contributes only at 30 samples; missing scores are never zero. Task coverage is a separate quality measure.",
+          title: "Codex Radar", subtitle: "Model benchmarks · Cost × IQ", metric: "Metric",
           combined: "Combined cost × IQ", time: "Time cost × IQ", price: "Price cost × IQ",
           efficient: "Upper-left is more efficient", source: "Source: Codex Radar ↗",
           sync: "Synced", through: "Source data", next: "Next check", cadence: "Sync every 4 hours",
@@ -383,10 +517,15 @@ SCRIPT = r"""
           failed: "Could not read the local Radar cache. Retrying automatically.",
           cache: "The latest data could not be saved to disk.", refreshing: "Syncing…",
           combinedAxis: "Relative combined cost index (log scale)", timeAxis: "Average duration · minutes (log scale)",
-          priceAxis: "Average cost · USD (log scale)", table: "View all data", model: "Model", effort: "Effort",
+          priceAxis: "Cost · USD (log scale)", table: "View all data", model: "Model", effort: "Effort",
           cost: "Cost index", minutes: "Minutes", usd: "USD", hint: "Hover, tap, or focus a point to inspect its values.",
-          formula: "Community benchmark scores. IQ, price and time are weighted across software and visual tasks. Cost ∝ price × (minutes / 10)^3.053; the largest cost is normalized to 100. A // mark indicates a compressed gap on the log axis." },
-        zh: { title: "Codex Radar", subtitle: "综合智能 · 成本 × IQ", metric: "切换指标",
+          formula: "Community benchmark scores. Composite scores use eligible component samples. Source costs may be medians; the composite is weighted. Cost ∝ price × (minutes / 10)^3.053; the largest cost in the selected generation and benchmark is normalized to 100. A // mark indicates a compressed gap on the log axis." },
+        zh: { comprehensive: "综合智能", software: "软件工程能力", visual: "视觉空间推理",
+          coverage: "独立题", generation: "模型代际", benchmark: "评测维度", insufficient: "数据不足", softwareOnly: "仅软件工程",
+          lowCoverage: "独立题覆盖 <60%", unknownCoverage: "覆盖率未知", samples: "样本数 SWE / 视觉",
+          noPlot: "当前分组在此指标下暂无可绘制的数据。", median: "费用中位数", mean: "平均费用", weighted: "加权费用", unknown: "费用",
+          threshold: "GPT-6 Sol/Luna 的软件工程样本达到 30 份后可显示综合分；视觉样本达到 30 份才参与加权，缺失不计零。独立题覆盖率是另外的质量指标。",
+          title: "Codex Radar", subtitle: "模型评测 · 成本 × IQ", metric: "切换指标",
           combined: "综合成本 × IQ", time: "时间成本 × IQ", price: "费用成本 × IQ",
           efficient: "越靠左上越高效", source: "来源：Codex Radar ↗",
           sync: "上次同步", through: "源数据截至", next: "下次检查", cadence: "每 4 小时同步",
@@ -395,19 +534,51 @@ SCRIPT = r"""
           failed: "暂时无法读取本地 Radar 缓存，将自动重试。",
           cache: "最新数据暂未保存到磁盘。", refreshing: "正在同步…",
           combinedAxis: "相对综合成本指数（对数刻度）", timeAxis: "平均耗时 · 分钟（对数刻度）",
-          priceAxis: "平均费用 · USD（对数刻度）", table: "查看完整数据", model: "模型", effort: "推理档位",
+          priceAxis: "费用 · USD（对数刻度）", table: "查看完整数据", model: "模型", effort: "推理档位",
           cost: "成本指数", minutes: "分钟", usd: "USD", hint: "悬停、点击或用键盘聚焦数据点查看数值。",
-          formula: "社区评测分数。IQ、费用和耗时按软件工程与视觉任务的有效题量加权。综合成本 ∝ 费用 × (分钟 / 10)^3.053，最高成本归一为 100。横轴 // 表示压缩的对数区间。" }
+          formula: "社区评测分数。综合指标按符合门槛的有效样本加权；源费用可能为中位数。综合成本 ∝ 费用 × (分钟 / 10)^3.053，所选代际及评测维度内最高成本归一为 100。横轴 // 表示压缩的对数区间。" }
       };
+      let generation = "gpt6", mode = "comprehensive", visiblePoints = [];
       let root = null, lang = "en", metric = "combined", payload = null, formatAge = null;
       let pending = false, checkedAt = 0, timer = null, localError = false, tableOpen = false, signature = "";
       const esc = (v) => String(v ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"}[c]));
       const t = (key) => words[lang][key];
-      const fmt = (v) => Number(v).toLocaleString(lang === "zh" ? "zh-CN" : "en-GB", {maximumSignificantDigits: 4});
+      const fmt = (v) => v == null ? "—" : Number(v).toLocaleString(lang === "zh" ? "zh-CN" : "en-GB", {maximumSignificantDigits: 4});
       const tick = (v) => v >= 10 ? String(Math.round(v)) : v >= 1 ? v.toFixed(1)
         : v >= .01 ? v.toFixed(2) : v >= .0001 ? v.toFixed(4) : v.toExponential(1);
       const date = (v) => v ? new Date(v).toLocaleString(lang === "zh" ? "zh-CN" : "en-GB", {month:"short", day:"numeric", hour:"2-digit", minute:"2-digit", timeZoneName:"short"}) : "—";
-      const pointText = (p) => `${models[p.model][0]} · ${p.effort} · IQ ${fmt(p.iq)} · ${t("cost")} ${fmt(p.combined_cost_index)} · $${fmt(p.average_price_usd)} · ${fmt(p.average_minutes)} ${t("minutes")}`;
+      function coverageText(p) {
+        if (!p.model.startsWith('gpt-6-')) return '';
+        const ratio=(n,total)=>n==null||total==null||total<=0?'—':`${fmt(n)}/${fmt(total)}`;
+        const parts=[];
+        if(mode!=='visual') parts.push(`SWE ${t('coverage')} ${ratio(p.software_covered_tasks,p.software_benchmark_tasks)}`);
+        if(mode!=='software') parts.push(`${t('visual')} ${t('coverage')} ${ratio(p.visual_samples,p.visual_benchmark_tasks)}`);
+        return parts.join(' · ');
+      }
+      const pointText = (p) => `${models[p.model][0]} · ${p.effort} · IQ ${fmt(p.iq)} · ${t("cost")} ${fmt(p.combined_cost_index)} · ${t(p.price_aggregation || "unknown")} $${fmt(p.average_price_usd)} · ${fmt(p.average_minutes)} ${t("minutes")} · ${t("samples")} ${fmt(p.software_samples)} / ${fmt(p.visual_samples)}${mode === "comprehensive" && p.score_basis === "software" ? " · " + t("softwareOnly") : ""}${coverageText(p) ? " · " + coverageText(p) : ""}`;
+      function quality(p) {
+        if (!p.model.startsWith('gpt-6-')) return '';
+        const components = [];
+        if (mode !== 'visual') components.push([p.software_covered_tasks, p.software_benchmark_tasks]);
+        if (mode !== 'software') components.push([p.visual_samples, p.visual_benchmark_tasks]);
+        if (components.some(([n,total]) => n == null || total == null || total <= 0 || n > total)) return t('unknownCoverage');
+        return components.some(([n,total]) => n / total < .6) ? t('lowCoverage') : '';
+      }
+      function cards(points, data) {
+        return Object.entries(models).filter(([model]) => model.startsWith(generation === 'gpt6' ? 'gpt-6-' : 'gpt-5.')).map(([model,[name,color]]) => {
+          const rows=points.filter(p => p.model===model);
+          const expected=['gpt-6-sol','gpt-6-luna'].includes(model)
+            ? efforts.filter(e=>model!=='gpt-6-luna'||e!=='ultra') : rows.map(p=>p.effort);
+          if (!expected.length) return '';
+          return `<div class="radar-family"><h3>${name}</h3><div class="radar-scores">${expected.slice().reverse().map(effort=>{
+            const p=rows.find(p=>p.effort===effort);
+            const sample=(data?.samples||[]).find(p=>p.model===model&&p.effort===effort);
+            if (!p) return `<div class="radar-score" style="--series-color:${color}">${effort}<strong>—</strong><small>${t('insufficient')}</small><small>SWE ${fmt(sample?.software_samples)} / ${fmt(sample?.visual_samples)}</small></div>`;
+            const note=quality(p);
+            return `<button type="button" class="radar-score" style="--series-color:${color}" data-radar-card="${points.indexOf(p)}" aria-label="${esc(pointText(p))}">${effort}<strong>${fmt(p.iq)}</strong><small>$${fmt(p.average_price_usd)} · ${fmt(p.average_minutes)} ${t('minutes')}</small>${mode==='comprehensive'&&p.score_basis==='software'?`<small>${t('softwareOnly')}</small>`:''}${note?`<small class="radar-quality">${note}</small>`:''}</button>`;
+          }).join('')}</div></div>`;
+        }).join('');
+      }
       const shape = (effort, color) => {
         const attrs = `fill="var(--panel)" stroke="${color}" stroke-width="2.5"`;
         if (effort === "low") return `<circle r="5" ${attrs}/>`;
@@ -426,6 +597,8 @@ SCRIPT = r"""
         const compact = width < 620, height = compact ? 340 : 440;
         const left = 44, right = 20, top = 26, bottom = 54, pw = width-left-right, ph = height-top-bottom;
         const field = {combined:"combined_cost_index", time:"average_minutes", price:"average_price_usd"}[metric];
+        points = points.filter(p => Number.isFinite(p[field]) && p[field] > 0 && Number.isFinite(p.iq));
+        if (!points.length) return `<div class="empty">${t('noPlot')}</div>`;
         const values = [...new Set(points.map(p => p[field]))].sort((a,b) => a-b);
         const min = values[0], max = values.at(-1), second = values[1];
         const broken = second / min >= 4, gap = compact ? .19 : .14;
@@ -452,7 +625,7 @@ SCRIPT = r"""
           if (!series.length) return;
           svg += `<path d="${series.map((p,i) => `${i?'L':'M'}${x(p[field])},${y(p.iq)}`).join(' ')}" fill="none" stroke="${color}" stroke-width="2"/>`;
           series.forEach((p,i) => {
-            const index=points.indexOf(p), px=x(p[field]), py=y(p.iq);
+            const index=visiblePoints.indexOf(p), px=x(p[field]), py=y(p.iq);
             svg += `<g class="radar-point" data-radar-point="${index}" tabindex="0" role="img" aria-label="${esc(pointText(p))}" transform="translate(${px},${py})"><circle class="radar-hit" r="13" fill="transparent"/>${shape(p.effort,color)}</g>`;
             if (!compact) svg += `<text class="radar-label" pointer-events="none" text-anchor="middle" x="${px}" y="${py+((familyIndex+i)%2?20:-12)}">${esc(p.effort)}</text>`;
           });
@@ -468,26 +641,36 @@ SCRIPT = r"""
           age.title = `${t("sync")}: ${date(payload?.fetched_at)} · ${t("through")}: ${date(payload?.data?.source_updated_at)}`;
           age.closest('.panel-heading-extra')?.classList.toggle('panel-heading-extra--warn', Boolean(payload?.stale || localError));
         }
-        const key=JSON.stringify([payload,lang,metric,localError,Math.round(root.clientWidth)]);
+        const key=JSON.stringify([payload,lang,metric,mode,generation,localError,Math.round(root.clientWidth)]);
         if (signature===key) return;
         signature=key;
         const focused=document.activeElement;
         const activePoint=root.contains(focused) ? focused.getAttribute('data-radar-point') : null;
+        const activeCard=root.contains(focused) ? focused.getAttribute('data-radar-card') : null;
+        const activeMode=root.contains(focused) ? focused.getAttribute('data-radar-mode') : null;
+        const activeGeneration=root.contains(focused) ? focused.getAttribute('data-radar-generation') : null;
         const activeSelector=root.contains(focused) && focused.matches('[data-radar-metric]');
         const activeSummary=root.contains(focused) && focused.matches('summary');
-        const p=payload, data=p?.data, points=data?.points || [];
+        const p=payload, data=p?.data;
+        const view=data?.views?.[mode];
+        const points=(view?.points || (mode==='comprehensive' ? data?.points : []) || []).filter(p=>p.model.startsWith(generation==='gpt6'?'gpt-6-':'gpt-5.'));
+        visiblePoints=points;
         const warning=localError ? t("failed") : p?.stale ? t("stale") : p?.cache_warning ? t("cache") : "";
-        const meta=p ? `${t("cadence")} · ${t("sync")}: ${date(p.fetched_at)} · ${t("through")}: ${date(data?.source_updated_at)} · ${t("next")}: ${date(p.next_attempt_at)}` : t("cadence");
-        const toolbar=`<div class="radar-toolbar"><label>${t("metric")}<select aria-label="${t("metric")}" data-radar-metric>${["combined","time","price"].map(k=>`<option value="${k}" ${k===metric?'selected':''}>${t(k)}</option>`).join('')}</select></label><a class="radar-source" href="https://codexradar.com/" target="_blank" rel="noopener noreferrer">${t("source")}</a></div><div class="radar-meta">${esc(meta)}${p?.refreshing?' · '+t("refreshing"):''}</div>${warning?`<p class="radar-warning" role="status">${warning}</p>`:''}`;
-        if (!points.length) {
+        const meta=p ? `${t("cadence")} · ${t("sync")}: ${date(p.fetched_at)} · ${t("through")}: ${date(view?.source_updated_at || data?.source_updated_at)} · ${t("next")}: ${date(p.next_attempt_at)}` : t("cadence");
+        const tabs=`<div class="radar-tabs" role="group" aria-label="${t('benchmark')}">${['comprehensive','software','visual'].map(k=>`<button type="button" data-radar-mode="${k}" aria-pressed="${k===mode}">${t(k)}</button>`).join('')}</div><div class="radar-tabs" role="group" aria-label="${t('generation')}">${['gpt6','gpt5'].map(k=>`<button type="button" data-radar-generation="${k}" aria-pressed="${k===generation}">${k==='gpt6'?'GPT-6':'GPT-5'}</button>`).join('')}</div>`;
+        const toolbar=tabs+`<div class="radar-toolbar"><label>${t("metric")}<select aria-label="${t("metric")}" data-radar-metric>${["combined","time","price"].map(k=>`<option value="${k}" ${k===metric?'selected':''}>${t(k)}</option>`).join('')}</select></label><a class="radar-source" href="https://codexradar.com/" target="_blank" rel="noopener noreferrer">${t("source")}</a></div><div class="radar-meta">${esc(meta)}${p?.refreshing?' · '+t("refreshing"):''}</div>${warning?`<p class="radar-warning" role="status">${warning}</p>`:''}`;
+        if (!data) {
           root.innerHTML=toolbar+`<div class="empty" role="status">${p?.last_error || localError ? t("unavailable") : t("loading")}</div>`;
           return;
         }
         // Build the chart before replacing DOM: measuring a temporarily empty
         // panel can clamp the page scroll position during a background refresh.
-        root.innerHTML=toolbar+`<div class="radar-legend">${Object.entries(models).filter(([m])=>points.some(p=>p.model===m)).map(([, [name,color]])=>`<span><i style="background:${color}"></i>${name}</span>`).join('')}<span>${t("efficient")}</span></div><div class="radar-chart">${chart(points)}</div><div class="radar-detail" aria-live="polite">${t("hint")}</div><p class="radar-formula">${t("formula")}</p><details class="radar-table" ${tableOpen?'open':''}><summary>${t("table")} · ${points.length}</summary><div class="table-wrap"><table><thead><tr>${[t("model"),t("effort"),"IQ",t("cost"),t("usd"),t("minutes")].map(v=>`<th>${v}</th>`).join('')}</tr></thead><tbody>${points.map(p=>`<tr>${[models[p.model][0],p.effort,fmt(p.iq),fmt(p.combined_cost_index),fmt(p.average_price_usd),fmt(p.average_minutes)].map(v=>`<td>${esc(v)}</td>`).join('')}</tr>`).join('')}</tbody></table></div></details>`;
+        root.innerHTML=toolbar+`${generation==='gpt6'?`<p class="radar-formula">${t('threshold')}</p>`:''}${cards(points,data)}<div class="radar-legend">${Object.entries(models).filter(([m])=>points.some(p=>p.model===m)).map(([, [name,color]])=>`<span><i style="background:${color}"></i>${name}</span>`).join('')}<span>${t("efficient")}</span></div><div class="radar-chart">${chart(points)}</div><div class="radar-detail" aria-live="polite">${t("hint")}</div><p class="radar-formula">${t("formula")}</p><details class="radar-table" ${tableOpen?'open':''}><summary>${t("table")} · ${points.length}</summary><div class="table-wrap"><table><thead><tr>${[t("model"),t("effort"),"IQ",t("cost"),t("usd"),t("minutes"),t("samples")].map(v=>`<th>${v}</th>`).join('')}</tr></thead><tbody>${points.map(p=>`<tr>${[models[p.model][0],p.effort,fmt(p.iq),fmt(p.combined_cost_index),fmt(p.average_price_usd),fmt(p.average_minutes),`${fmt(p.software_samples)} / ${fmt(p.visual_samples)}`].map(v=>`<td>${esc(v)}</td>`).join('')}</tr>`).join('')}</tbody></table></div></details>`;
         root.querySelector("details").addEventListener("toggle", e => {tableOpen=e.target.open;});
         if (activePoint!==null) root.querySelector(`[data-radar-point="${activePoint}"]`)?.focus({preventScroll:true});
+        else if (activeCard!==null) root.querySelector(`[data-radar-card="${activeCard}"]`)?.focus({preventScroll:true});
+        else if (activeMode!==null) root.querySelector(`[data-radar-mode="${activeMode}"]`)?.focus({preventScroll:true});
+        else if (activeGeneration!==null) root.querySelector(`[data-radar-generation="${activeGeneration}"]`)?.focus({preventScroll:true});
         else if (activeSelector) root.querySelector('select').focus({preventScroll:true});
         else if (activeSummary) root.querySelector('summary').focus({preventScroll:true});
       }
@@ -523,10 +706,18 @@ SCRIPT = r"""
                 metric=e.target.value; render(); root.querySelector('select').focus();
               }
             });
+            root.addEventListener('click', e=>{
+              const button=e.target.closest('[data-radar-mode], [data-radar-generation]');
+              if (!button) return;
+              const attr=button.hasAttribute('data-radar-mode')?'data-radar-mode':'data-radar-generation';
+              const value=button.getAttribute(attr);
+              if (attr==='data-radar-mode') mode=value; else generation=value;
+              render(); root.querySelector(`[${attr}="${value}"]`)?.focus({preventScroll:true});
+            });
             const inspect=e=>{
-              const marker=e.target.closest('[data-radar-point]');
+              const marker=e.target.closest('[data-radar-point], [data-radar-card]');
               if (!marker) return;
-              const p=payload?.data?.points[Number(marker.dataset.radarPoint)];
+              const p=visiblePoints[Number(marker.dataset.radarPoint ?? marker.dataset.radarCard)];
               if (p) root.querySelector('.radar-detail').textContent=pointText(p);
             };
             ['pointerover','focusin','click'].forEach(event=>root.addEventListener(event,inspect));

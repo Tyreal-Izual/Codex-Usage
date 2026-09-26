@@ -46,7 +46,7 @@ class CompositeTest(unittest.TestCase):
         self.assertEqual(len(result["points"]), 2)
         self.assertEqual(astra["iq"], 110)
         self.assertEqual(astra["average_price_usd"], 3)
-        self.assertAlmostEqual(astra["combined_cost_index"], 30)
+        self.assertEqual(astra["combined_cost_index"], 100)  # separate generation scales
         self.assertEqual(sol["iq"], 90)
         self.assertEqual(sol["combined_cost_index"], 100)
         self.assertEqual(result["source_updated_at"], "2026-09-07T09:00:00+00:00")
@@ -58,13 +58,14 @@ class CompositeTest(unittest.TestCase):
             row["weighted_total"] = row.pop("total")
         # 2.5 times the price, 1.35 times faster => equal combined cost.
         for payload in (software, visual):
+            payload["points"][1].update(model="gpt-6-astra", effort="medium")
             payload["points"][0].update(average_price_usd=2.5, average_minutes=10 / 1.35)
             payload["points"][1].update(average_price_usd=1, average_minutes=10)
         points = radar.combine_snapshots(software, visual)["points"]
         self.assertAlmostEqual(points[0]["combined_cost_index"], points[1]["combined_cost_index"])
 
-    def test_bad_schema_nonfinite_duplicate_and_missing_intersection_fail(self):
-        for kind in ("schema", "nan", "negative", "duplicate", "disjoint", "timestamp"):
+    def test_bad_schema_nonfinite_duplicate_and_timestamp_fail(self):
+        for kind in ("schema", "nan", "negative", "duplicate", "timestamp"):
             with self.subTest(kind=kind):
                 software, visual = fixtures()
                 if kind == "schema":
@@ -75,8 +76,6 @@ class CompositeTest(unittest.TestCase):
                     visual["points"][0]["average_minutes"] = -1
                 elif kind == "duplicate":
                     visual["points"].append(copy.deepcopy(visual["points"][0]))
-                elif kind == "disjoint":
-                    visual["points"] = []
                 else:
                     visual["source_updated_at"] = "yesterday"
                 with self.assertRaises(ValueError):
@@ -86,7 +85,9 @@ class CompositeTest(unittest.TestCase):
         software, visual = fixtures()
         visual["points"][0]["average_price_usd"] = None
         points = radar.combine_snapshots(software, visual)["points"]
-        self.assertEqual([p["model"] for p in points], ["gpt-5.6-sol"])
+        self.assertIsNone(points[0]["average_price_usd"])
+        self.assertIsNone(points[0]["combined_cost_index"])
+        self.assertEqual(points[0]["iq"], 110)
 
     def test_unplottable_zero_values_do_not_discard_other_configurations(self):
         software, visual = fixtures()
@@ -101,10 +102,75 @@ class CompositeTest(unittest.TestCase):
                 self.assertEqual(points[0][field], visual["points"][0][field] / 4)
                 visual["points"][0][field] = 0
                 points = radar.combine_snapshots(software, visual)["points"]
-                self.assertEqual([p["model"] for p in points], ["gpt-5.6-sol"])
+                self.assertIsNone(points[0]["combined_cost_index"])
+                self.assertEqual(points[1]["combined_cost_index"], 100)
         software, visual = fixtures()
         software["points"][0]["iq"] = visual["points"][0]["iq"] = 0
         self.assertEqual(radar.combine_snapshots(software, visual)["points"][0]["iq"], 0)
+
+
+class CurrentRadarRulesTest(unittest.TestCase):
+    def payloads(self, software_samples=30, visual_samples=29):
+        software, visual = fixtures()
+        software["points"] = [{**software["points"][0], "model":"gpt-6-sol", "total":software_samples, "price_aggregation":"median"}]
+        visual["points"] = [{**visual["points"][0], "model":"gpt-6-sol", "valid_tasks":visual_samples, "benchmark_tasks":86, "price_aggregation":"median"}]
+        return software, visual
+
+    def test_new_gpt6_software_only_does_not_treat_visual_as_zero(self):
+        result = radar.combine_snapshots(*self.payloads())
+        point = result["points"][0]
+        self.assertEqual(point["iq"], 100)
+        self.assertEqual(point["average_price_usd"], 2)
+        self.assertIsNone(point["visual_iq"])
+        self.assertFalse(point["visual_included"])
+        self.assertEqual(point["score_basis"], "software")
+        self.assertEqual(result["views"]["visual"]["points"], [])
+        self.assertEqual(result["samples"][0]["visual_samples"], 29)
+        self.assertEqual(result["views"]["software"]["points"][0]["price_aggregation"], "median")
+
+    def test_below_threshold_snapshot_shows_insufficient_data_without_invented_scores(self):
+        result = radar.combine_snapshots(*self.payloads(29, 29))
+        self.assertTrue(radar.validate_snapshot(result))
+        self.assertTrue(all(not view["points"] for view in result["views"].values()))
+        self.assertEqual(result["samples"][0]["software_samples"], 29)
+
+    def test_visual_contributes_at_thirty_samples(self):
+        result = radar.combine_snapshots(*self.payloads(30, 30))
+        self.assertEqual(result["points"][0]["iq"], 120)
+        self.assertEqual(result["points"][0]["average_price_usd"], 4)
+        self.assertTrue(result["points"][0]["visual_included"])
+
+    def test_software_threshold_blocks_composite_but_not_valid_visual_view(self):
+        result = radar.combine_snapshots(*self.payloads(29, 30))
+        self.assertEqual(result["points"], [])
+        self.assertEqual(result["views"]["software"]["points"], [])
+        self.assertEqual(len(result["views"]["visual"]["points"]), 1)
+        self.assertTrue(radar.validate_snapshot(result))
+
+    def test_legacy_models_still_need_two_components_for_composite(self):
+        software, visual = fixtures()
+        visual["points"] = []
+        result = radar.combine_snapshots(software, visual)
+        self.assertEqual(result["points"], [])
+        self.assertTrue(result["views"]["software"]["points"])
+
+    def test_more_than_thirty_points_are_valid_and_generations_normalize_separately(self):
+        software, visual = fixtures()
+        a, b = software["points"][0], visual["points"][0]
+        software["points"] = [{**a,"model":m,"effort":e,"total":40} for m in radar.MODEL_NAMES for e in radar.EFFORTS]
+        visual["points"] = [{**b,"model":m,"effort":e,"valid_tasks":40} for m in radar.MODEL_NAMES for e in radar.EFFORTS]
+        result = radar.combine_snapshots(software, visual)
+        self.assertGreater(len(result["points"]),30)
+        self.assertTrue(radar.validate_snapshot(result))
+        for prefix in ("gpt-6-", "gpt-5."):
+            self.assertEqual(max(p["combined_cost_index"] for p in result["points"] if p["model"].startswith(prefix)),100)
+
+    def test_distinct_coverage_is_not_derived_from_sample_count(self):
+        result = radar.combine_snapshots(*self.payloads(90, 30), coverage={("gpt-6-sol","high"):(20,112)})
+        point=result["points"][0]
+        self.assertEqual(point["software_samples"],90)
+        self.assertEqual(point["software_covered_tasks"],20)
+        self.assertEqual(point["software_benchmark_tasks"],112)
 
 
 class ServiceTest(unittest.TestCase):
@@ -134,10 +200,10 @@ class ServiceTest(unittest.TestCase):
         self.now += radar.REFRESH_SECONDS - 1
         restarted = radar.RadarService(self.path, clock=lambda: self.now, fetcher=self.fetch)
         self.assertFalse(restarted.refresh_if_due())
-        self.assertEqual(len(self.calls), 2)
+        self.assertEqual(len(self.calls), 3)
         self.now += 1
         self.assertTrue(restarted.refresh_if_due())
-        self.assertEqual(len(self.calls), 4)
+        self.assertEqual(len(self.calls), 6)
         self.assertEqual(self.path.stat().st_mode & 0o777, 0o600)
 
     def test_failure_preserves_snapshot_and_persists_retry_backoff(self):
@@ -159,6 +225,35 @@ class ServiceTest(unittest.TestCase):
         self.assertTrue(restarted.refresh_if_due())
         self.assertFalse(restarted.snapshot()["stale"])
         self.assertIsNone(restarted.snapshot()["last_error"])
+
+    def test_legacy_cache_refreshes_immediately_and_survives_network_failure(self):
+        self.service.refresh_if_due()
+        state = json.loads(self.path.read_text())
+        state["schema_version"] = 1
+        state["snapshot"].pop("views")
+        self.path.write_text(json.dumps(state))
+        upgraded = radar.RadarService(self.path, clock=lambda: self.now, fetcher=self.fetch)
+        self.assertTrue(upgraded.snapshot()["available"])
+        self.assertTrue(upgraded.snapshot()["stale"])
+        self.error = OSError("offline")
+        self.assertFalse(upgraded.refresh_if_due())
+        self.assertTrue(upgraded.snapshot()["available"])
+        upgraded = radar.RadarService(self.path, clock=lambda: self.now, fetcher=self.fetch)
+        self.assertTrue(upgraded.snapshot()["available"])
+        count = len(self.calls)
+        self.assertFalse(upgraded.refresh_if_due())
+        self.assertEqual(len(self.calls), count)
+        self.now += radar.RETRY_SECONDS
+        self.error = None
+        self.assertTrue(upgraded.refresh_if_due())
+        self.assertEqual(json.loads(self.path.read_text())["schema_version"], radar.CACHE_VERSION)
+        self.assertIn("views", upgraded.snapshot()["data"])
+
+    def test_optional_coverage_failure_keeps_new_scores(self):
+        self.service.refresh_if_due()
+        self.assertTrue(self.service.snapshot()["available"])
+        self.assertIsNotNone(self.service.snapshot()["data"]["coverage_warning"])
+        self.assertIsNone(self.service.snapshot()["last_error"])
 
     def test_partial_fetch_never_replaces_good_snapshot(self):
         self.service.refresh_if_due()
@@ -206,7 +301,7 @@ class ServiceTest(unittest.TestCase):
             self.assertTrue(saved.wait(timeout=2))
             self.service.close()
         self.assertFalse(self.service._thread.is_alive())
-        self.assertEqual(len(self.calls), 2)
+        self.assertEqual(len(self.calls), 3)
 
     def test_corrupt_cache_recovers_and_disk_failure_keeps_live_data(self):
         self.path.write_text('{"broken":')
@@ -265,6 +360,32 @@ class FetchTest(unittest.TestCase):
             response.body = b"x" * (radar.MAX_RESPONSE_BYTES + 1)
             with self.assertRaises(ValueError):
                 radar.fetch_json(radar.METRICS_URL)
+
+
+class CoverageContractTest(unittest.TestCase):
+    def test_coverage_accepts_only_distinct_counts_within_benchmark(self):
+        data={"schema":1,"benchmark_id":"deep-swe","coverage_mode":"distinct-task-selected-n-v1",
+              "total_tasks":112,"latest_graded_at":"2026-09-26T12:00:00Z",
+              "points":[{"model":"gpt-6-sol","effort":"high","covered_tasks":20}]}
+        self.assertEqual(radar.coverage_points(data),{("gpt-6-sol","high"):(20,112)})
+        for covered in (-1,113,True,2.5):
+            data["points"][0]["covered_tasks"]=covered
+            with self.subTest(covered=covered), self.assertRaises(ValueError):
+                radar.coverage_points(data)
+
+    def test_expired_or_unknown_coverage_headers_are_rejected(self):
+        class Response:
+            headers={"X-Codex-Cache":"HIT"}
+            def __enter__(self): return self
+            def __exit__(self,*args): pass
+            def read(self,_): return b'{}'
+        response=Response()
+        with patch.object(radar,"urlopen",return_value=response):
+            with self.assertRaises(ValueError): radar.fetch_json(radar.COVERAGE_URL)
+            response.headers.update({"X-Codex-Cache-Age":"12","X-Codex-Fetched-At":"1788782400"})
+            self.assertEqual(radar.fetch_json(radar.COVERAGE_URL),{})
+            response.headers["X-Codex-Cache-Age"]="300"
+            with self.assertRaises(ValueError): radar.fetch_json(radar.COVERAGE_URL)
 
 
 class RadarAPITest(unittest.TestCase):
