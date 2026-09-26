@@ -275,6 +275,10 @@ def validate_snapshot(snapshot: Any, *, legacy: bool = False) -> bool:
                 if iq is None or not 0 <= iq <= 150:
                     return False
                 for field in ("average_price_usd", "average_minutes", "combined_cost_index"):
+                    # Null is a supported missing measurement; an absent field
+                    # is a malformed cache and cannot be normalized safely.
+                    if field not in point:
+                        return False
                     value = point.get(field)
                     if value is not None:
                         number = finite_number(value)
@@ -601,7 +605,8 @@ SCRIPT = r"""
         if (!points.length) return `<div class="empty">${t('noPlot')}</div>`;
         const values = [...new Set(points.map(p => p[field]))].sort((a,b) => a-b);
         const min = values[0], max = values.at(-1), second = values[1];
-        const broken = second / min >= 4, gap = compact ? .19 : .14;
+        // A broken axis needs a non-degenerate range after the isolated minimum.
+        const broken = values.length > 2 && second / min >= 4, gap = compact ? .19 : .14;
         const logShare = (v,a,b) => a === b ? .5 : Math.log(v/a)/Math.log(b/a);
         const x = (v) => left + pw * (broken ? (v < second ? 0 : gap + (1-gap)*logShare(v,second,max)) : logShare(v,min,max));
         const yMax = Math.min(150, Math.max(20, Math.ceil(Math.max(...points.map(p => p.iq))/20)*20));

@@ -3,9 +3,12 @@ from __future__ import annotations
 import copy
 import http.client
 import json
+import shutil
+import subprocess
 import tempfile
 import threading
 import unittest
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from unittest.mock import patch
 
@@ -312,6 +315,21 @@ class ServiceTest(unittest.TestCase):
         self.assertTrue(service.snapshot()["available"])
         self.assertIsNotNone(service.snapshot()["cache_warning"])
 
+    def test_missing_measurement_fields_in_cache_do_not_break_startup(self):
+        for version in (1, radar.CACHE_VERSION):
+            for field in ("average_price_usd", "average_minutes", "combined_cost_index"):
+                with self.subTest(version=version, field=field):
+                    snapshot = radar.combine_snapshots(*fixtures())
+                    if version == 1:
+                        snapshot.pop("views")
+                    del snapshot["points"][0][field]
+                    self.path.write_text(json.dumps({"schema_version": version, "snapshot": snapshot,
+                        "fetched_at_epoch": self.now, "next_attempt_at_epoch": self.now + radar.REFRESH_SECONDS}))
+                    service = radar.RadarService(self.path, clock=lambda: self.now, fetcher=self.fetch)
+                    self.assertFalse(service.snapshot()["available"])
+                    self.assertTrue(service.refresh_if_due())
+                    self.assertTrue(service.snapshot()["available"])
+
     def test_invalid_cache_times_cannot_crash_or_postpone_recovery(self):
         snapshot = radar.combine_snapshots(*fixtures())
         for timestamp in (float("inf"), 1e30, "bad", -1, None):
@@ -386,6 +404,41 @@ class CoverageContractTest(unittest.TestCase):
             self.assertEqual(radar.fetch_json(radar.COVERAGE_URL),{})
             response.headers["X-Codex-Cache-Age"]="300"
             with self.assertRaises(ValueError): radar.fetch_json(radar.COVERAGE_URL)
+
+
+@unittest.skipUnless(shutil.which("node"), "Node.js is needed for the SVG axis regression test")
+class ChartAxisTest(unittest.TestCase):
+    def test_two_distinct_costs_have_unique_ticks_and_use_full_plot_width(self):
+        # Execute the real chart renderer without a browser. The surrounding
+        # helpers are pure until render(), so only its width input is stubbed.
+        start = radar.SCRIPT.index("      const models =")
+        end = radar.SCRIPT.index("      function render()")
+        renderer = radar.SCRIPT[start:end]
+        for costs in ((1, 100), (1, 1, 100)):
+            with self.subTest(costs=costs):
+                points = [{"model": "gpt-6-astra", "effort": radar.EFFORTS[i], "iq": 90 + i * 5,
+                           "average_price_usd": cost, "average_minutes": 10,
+                           "combined_cost_index": cost} for i, cost in enumerate(costs)]
+                source = renderer + "\nroot={clientWidth:1000}; visiblePoints=" + json.dumps(points)
+                source += "; process.stdout.write(chart(visiblePoints));"
+                output = subprocess.run([shutil.which("node")], input=source, text=True,
+                                        capture_output=True, check=True, timeout=5).stdout
+                svg = ET.fromstring(output)
+                ticks = []
+                for element in svg.findall("text"):
+                    if element.get("text-anchor") != "middle":
+                        continue
+                    try:
+                        value = float(element.text)
+                    except (ValueError, TypeError):
+                        continue
+                    ticks.append((float(element.get("x")), value))
+                positions = [x for x, _ in ticks]
+                self.assertGreaterEqual(len(ticks), 2)
+                self.assertEqual(len(positions), len(set(positions)))
+                self.assertEqual(ticks[0][1], min(costs))
+                self.assertEqual(ticks[-1][1], max(costs))
+                self.assertGreater(ticks[-1][0], 900)
 
 
 class RadarAPITest(unittest.TestCase):
