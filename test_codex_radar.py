@@ -176,6 +176,47 @@ class CurrentRadarRulesTest(unittest.TestCase):
         self.assertEqual(point["software_benchmark_tasks"],112)
 
 
+class Gpt61Test(unittest.TestCase):
+    def payloads(self, visual_samples=30):
+        software, visual = fixtures()
+        a, b = software["points"][0], visual["points"][0]
+        software["points"]=[{**a,"model":"gpt-6.1-sol","effort":e,"total":30} for e in radar.EFFORTS]
+        visual["points"]=[{**b,"model":"gpt-6.1-sol","effort":e,"valid_tasks":visual_samples} for e in radar.EFFORTS]
+        return software, visual
+
+    def test_five_efforts_in_all_views_and_no_ultra(self):
+        result=radar.combine_snapshots(*self.payloads())
+        self.assertTrue(radar.validate_snapshot(result))
+        for view in result["views"].values():
+            self.assertEqual({p["effort"] for p in view["points"]},set(radar.EFFORTS)-{"ultra"})
+            self.assertTrue(all(p["model"]=="gpt-6.1-sol" for p in view["points"]))
+            self.assertTrue(all(p["combined_cost_index"]==100 for p in view["points"]))
+        self.assertEqual(result["points"][0]["iq"],120)
+
+    def test_gpt61_shares_gpt6_cost_scale_and_coverage(self):
+        software,visual=self.payloads()
+        a={**software["points"][0],"model":"gpt-6-sol","average_price_usd":20}
+        b={**visual["points"][0],"model":"gpt-6-sol","average_price_usd":20}
+        software["points"].append(a); visual["points"].append(b)
+        coverage={("gpt-6.1-sol","low"):(24,112)}
+        result=radar.combine_snapshots(software,visual,coverage)
+        point=next(p for p in result["points"] if p["model"]=="gpt-6.1-sol" and p["effort"]=="low")
+        self.assertAlmostEqual(point["combined_cost_index"],20)
+        self.assertEqual(point["software_covered_tasks"],24)
+        self.assertEqual(point["software_benchmark_tasks"],112)
+
+    def test_gpt61_applies_thirty_sample_threshold_without_zero_filling(self):
+        software,visual=self.payloads(29)
+        result=radar.combine_snapshots(software,visual)
+        self.assertEqual(result["views"]["visual"]["points"],[])
+        self.assertTrue(all(p["score_basis"]=="software" and p["iq"]==100 for p in result["points"]))
+        for point in software["points"]: point["total"]=29
+        result=radar.combine_snapshots(software,visual)
+        self.assertTrue(radar.validate_snapshot(result))
+        self.assertTrue(all(not v["points"] for v in result["views"].values()))
+
+
+
 class ServiceTest(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
@@ -251,6 +292,27 @@ class ServiceTest(unittest.TestCase):
         self.assertTrue(upgraded.refresh_if_due())
         self.assertEqual(json.loads(self.path.read_text())["schema_version"], radar.CACHE_VERSION)
         self.assertIn("views", upgraded.snapshot()["data"])
+
+    def test_version_two_cache_refreshes_catalog_and_keeps_failure_backoff(self):
+        self.service.refresh_if_due()
+        state=json.loads(self.path.read_text())
+        state["schema_version"]=2
+        self.path.write_text(json.dumps(state))
+        service=radar.RadarService(self.path,clock=lambda:self.now,fetcher=self.fetch)
+        self.assertTrue(service.snapshot()["available"])
+        self.assertTrue(service.snapshot()["stale"])
+        self.error=OSError("offline")
+        self.assertFalse(service.refresh_if_due())
+        restarted=radar.RadarService(self.path,clock=lambda:self.now,fetcher=self.fetch)
+        count=len(self.calls)
+        self.assertTrue(restarted.snapshot()["available"])
+        self.assertFalse(restarted.refresh_if_due())
+        self.assertEqual(len(self.calls),count)
+        self.now+=radar.RETRY_SECONDS
+        self.error=None
+        self.assertTrue(restarted.refresh_if_due())
+        self.assertFalse(restarted.snapshot()["stale"])
+        self.assertEqual(json.loads(self.path.read_text())["schema_version"],radar.CACHE_VERSION)
 
     def test_optional_coverage_failure_keeps_new_scores(self):
         self.service.refresh_if_due()
@@ -408,6 +470,19 @@ class CoverageContractTest(unittest.TestCase):
 
 @unittest.skipUnless(shutil.which("node"), "Node.js is needed for the SVG axis regression test")
 class ChartAxisTest(unittest.TestCase):
+    def test_gpt61_frontend_group_and_placeholder_efforts_match_collector(self):
+        start=radar.SCRIPT.index("      const models =")
+        end=radar.SCRIPT.index("      function render()")
+        source=radar.SCRIPT[start:end]
+        source+='\nprocess.stdout.write(JSON.stringify({models:Object.keys(models), groups:generationModels, efforts:modelEfforts, html:cards([], {})}));'
+        output=subprocess.run([shutil.which("node")],input=source,text=True,capture_output=True,check=True,timeout=5).stdout
+        result=json.loads(output)
+        self.assertEqual(set(result["models"]),set(radar.MODEL_NAMES))
+        self.assertIn("gpt-6.1-sol",result["groups"]["gpt6"])
+        self.assertNotIn("gpt-6.1-sol",result["groups"]["gpt5"])
+        self.assertEqual(result["efforts"]["gpt-6.1-sol"],list(radar.EFFORTS[:-1]))
+        self.assertIn("GPT-6.1 Sol",result["html"])
+
     def test_two_distinct_costs_have_unique_ticks_and_use_full_plot_width(self):
         # Execute the real chart renderer without a browser. The surrounding
         # helpers are pure until render(), so only its width input is stubbed.

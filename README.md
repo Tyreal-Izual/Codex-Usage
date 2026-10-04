@@ -314,7 +314,7 @@ existing effect rather than restarting it.
 
 The Overview and Codex Usage views include a full-width **Codex Radar** panel
 immediately below Codex Reset Credits (banked resets). It shows community
-benchmark scores against combined cost, duration, or cost. It defaults to **GPT-6 Astra / Sol / Luna**,
+benchmark scores against combined cost, duration, or cost. It defaults to **GPT-6 (Astra, 6.1 Sol, 6 Sol, and Luna)**,
 with a GPT-5 group and separate composite, software-engineering, and visual-spatial
 views. Each view includes score cards and curves. The independent
 `codex_radar.py` module owns collection, calculation, caching, and the chart
@@ -329,11 +329,14 @@ offline time can delay updates. Failed refreshes retain the last successful
 snapshot and retry after 15, 30, 60, 120, then at most 240 minutes. The panel
 distinguishes source-data time from local sync time and marks stale results.
 
-The calculation follows Codex Radar's 2026-09-26 display rules:
+The calculation follows Codex Radar's 2026-10-04 display rules:
 
-- GPT-6 Sol/Luna need 30 valid software samples for composite IQ. Visual results
+- GPT-6.1 Sol and GPT-6 Sol/Luna need 30 valid software samples for composite IQ. Visual results
   contribute only with 30 valid samples of their own; otherwise the score is
   explicitly marked **Software only**. Missing scores are never treated as zero.
+- GPT-6.1 Sol supports low, medium, high, xhigh, and max (no ultra), sharing
+  the GPT-6 cost scale. Missing source scores show **Insufficient data** until
+  a later background refresh supplies eligible results.
 - Astra and GPT-5 composite scores still require both components. Individual
   benchmark views remain available independently.
 - Sample counts and distinct-task coverage are separate. Coverage below 60% is

@@ -2,7 +2,7 @@
 """Codex Radar collector, four-hour cache worker, and standalone dashboard widget.
 
 Only public benchmark metadata is requested. No account or transcript data is
-sent. The composite calculation follows https://codexradar.com/ (2026-09-26).
+sent. The composite calculation follows https://codexradar.com/ (2026-10-04).
 Run this file directly to update the cache once; the web server owns the worker.
 """
 
@@ -26,13 +26,14 @@ SOURCE_URL = "https://codexradar.com/"
 METRICS_URL = SOURCE_URL + "api/intelligence-efficiency-metrics"
 VISUAL_URL = SOURCE_URL + "api/visual-spatial-reasoning"
 COVERAGE_URL = SOURCE_URL + "api/intelligence-efficiency-coverage"
-CACHE_VERSION = 2
+CACHE_VERSION = 3
 REFRESH_SECONDS = 4 * 60 * 60
 RETRY_SECONDS = 15 * 60
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 DEFAULT_CACHE_PATH = Path(__file__).resolve().with_name("codex_radar_snapshot.json")
 MODEL_NAMES = {
     "gpt-6-astra": "GPT-6 Astra",
+    "gpt-6.1-sol": "GPT-6.1 Sol",
     "gpt-6-sol": "GPT-6 Sol",
     "gpt-6-luna": "GPT-6 Luna",
     "gpt-5.6-sol": "GPT-5.6 Sol",
@@ -40,9 +41,15 @@ MODEL_NAMES = {
     "gpt-5.6-luna": "GPT-5.6 Luna",
     "gpt-5.5": "GPT-5.5",
 }
-NEW_GPT6 = frozenset({"gpt-6-sol", "gpt-6-luna"})
+NEW_GPT6 = frozenset({"gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna"})
 MIN_SAMPLES = 30
 EFFORTS = ("low", "medium", "high", "xhigh", "max", "ultra")
+MODEL_GROUPS = {
+    "gpt6": ("gpt-6-astra", "gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna"),
+    "gpt5": ("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5"),
+}
+MODEL_EFFORTS = {model: EFFORTS[:-1] if model in {"gpt-6.1-sol", "gpt-6-luna"} else EFFORTS
+                 for model in MODEL_NAMES}
 COST_WEIGHT = math.log(2.5) / math.log(1.35)
 
 
@@ -124,7 +131,7 @@ def component_points(payload: dict[str, Any], *, software: bool) -> dict[tuple[s
         model, effort = row.get("model"), row.get("effort")
         if not isinstance(model, str) or not isinstance(effort, str):
             raise ValueError("Invalid Radar model or effort")
-        if model not in MODEL_NAMES or effort not in EFFORTS:
+        if model not in MODEL_NAMES or effort not in MODEL_EFFORTS[model]:
             continue
         fields = {key: finite_number(row.get(key)) for key in
                   ("iq", "average_price_usd", "average_minutes", weight_field)}
@@ -150,8 +157,8 @@ def component_points(payload: dict[str, Any], *, software: bool) -> dict[tuple[s
 
 def normalize_costs(points: list[dict[str, Any]]) -> None:
     """Normalize independently within GPT-6 and GPT-5, as the upstream tabs do."""
-    for prefix in ("gpt-6-", "gpt-5."):
-        group = [p for p in points if p["model"].startswith(prefix)]
+    for models in MODEL_GROUPS.values():
+        group = [p for p in points if p["model"] in models]
         logs = {}
         for index, point in enumerate(group):
             price, minutes = point["average_price_usd"], point["average_minutes"]
@@ -179,7 +186,7 @@ def coverage_points(payload: dict[str, Any]) -> dict[tuple[str, str], tuple[int,
         model, effort, covered = row.get("model"), row.get("effort"), row.get("covered_tasks")
         if not isinstance(model, str) or not isinstance(effort, str):
             raise ValueError("Invalid coverage identity")
-        if model not in MODEL_NAMES or effort not in EFFORTS:
+        if model not in MODEL_NAMES or effort not in MODEL_EFFORTS[model]:
             continue
         key = (model, effort)
         if type(covered) is not int or not 0 <= covered <= total or key in result:
@@ -192,7 +199,7 @@ def combine_snapshots(software: dict[str, Any], visual: dict[str, Any],
                       coverage: dict[tuple[str, str], tuple[int, int]] | None = None) -> dict[str, Any]:
     """Mirror the current source's composite eligibility and generation tabs.
 
-    New Sol/Luna need 30 software samples; visual contributes only with 30 of
+    GPT-6.1 Sol and GPT-6 Sol/Luna need 30 software samples; visual contributes only with 30 of
     its own. Astra and GPT-5 retain the two-component rule. Missing components
     are omitted, never treated as zero. Price input may be a median despite the
     upstream field's legacy average_price_usd name.
@@ -268,7 +275,7 @@ def validate_snapshot(snapshot: Any, *, legacy: bool = False) -> bool:
             seen = set()
             for point in points:
                 key = (point["model"], point["effort"])
-                if key[0] not in MODEL_NAMES or key[1] not in EFFORTS or key in seen:
+                if key[0] not in MODEL_NAMES or key[1] not in MODEL_EFFORTS[key[0]] or key in seen:
                     return False
                 seen.add(key)
                 iq = finite_number(point.get("iq"))
@@ -294,7 +301,7 @@ def validate_snapshot(snapshot: Any, *, legacy: bool = False) -> bool:
         identities = set()
         for row in samples:
             key = (row["model"], row["effort"])
-            if key[0] not in MODEL_NAMES or key[1] not in EFFORTS or key in identities:
+            if key[0] not in MODEL_NAMES or key[1] not in MODEL_EFFORTS[key[0]] or key in identities:
                 return False
             identities.add(key)
             for field in ("software_samples", "visual_samples"):
@@ -348,7 +355,7 @@ class RadarService:
             # correctly rejects them. Reject corrupt metadata here as well, so
             # retaining a failed attempt cannot crash the background worker.
             json.dumps(state, allow_nan=False)
-            if isinstance(state, dict) and state.get("schema_version") in (1, CACHE_VERSION):
+            if isinstance(state, dict) and state.get("schema_version") in (1, 2, CACHE_VERSION):
                 snapshot = state.get("snapshot")
                 fetched = finite_number(state.get("fetched_at_epoch"))
                 if snapshot is None or (validate_snapshot(snapshot, legacy=state["schema_version"] == 1 or state.get("legacy_snapshot") is True) and fetched is not None and 0 < fetched <= now + 60):
@@ -359,9 +366,9 @@ class RadarService:
                         self._state.pop("fetched_at_epoch", None)
         except (OSError, ValueError):
             pass
-        if self._state.get("schema_version") == 1:
+        if self._state.get("schema_version") in (1, 2):
             self._state["next_attempt_at_epoch"] = now
-            self._state["last_error"] = "Updating the legacy Radar snapshot to the current benchmark rules."
+            self._state["last_error"] = "Updating the Radar snapshot to the current model catalog and benchmark rules."
         # An invalid timestamp must never postpone initial recovery indefinitely.
         next_at = finite_number(self._state.get("next_attempt_at_epoch"))
         if next_at is None or not 0 < next_at <= now + REFRESH_SECONDS:
@@ -500,18 +507,22 @@ SCRIPT = r"""
     const CodexRadar = (() => {
       const models = {
         "gpt-6-astra": ["GPT-6 Astra", "#f97316"],
+        "gpt-6.1-sol": ["GPT-6.1 Sol", "#fde047"],
         "gpt-6-sol": ["GPT-6 Sol", "#facc15"], "gpt-6-luna": ["GPT-6 Luna", "#a5b4fc"],
         "gpt-5.6-sol": ["GPT-5.6 Sol", "#eab308"],
         "gpt-5.6-terra": ["GPT-5.6 Terra", "#60a5fa"], "gpt-5.6-luna": ["GPT-5.6 Luna", "#c7d2e0"],
         "gpt-5.5": ["GPT-5.5", "#00e5ff"]
       };
       const efforts = ["low", "medium", "high", "xhigh", "max", "ultra"];
+      const generationModels = __RADAR_GENERATIONS__;
+      const modelEfforts = __RADAR_MODEL_EFFORTS__;
+      const thresholdModels = __RADAR_THRESHOLD_MODELS__;
       const words = {
         en: { comprehensive: "Composite", software: "Software engineering", visual: "Visual-spatial",
           coverage: "distinct tasks", generation: "Model generation", benchmark: "Benchmark", insufficient: "Insufficient data", softwareOnly: "Software only",
           lowCoverage: "Task coverage <60%", unknownCoverage: "Coverage unavailable", samples: "Samples SWE / visual",
           noPlot: "No plottable values for this metric in this group.", median: "Median cost", mean: "Mean cost", weighted: "Weighted cost", unknown: "Cost",
-          threshold: "GPT-6 Sol/Luna need 30 valid software samples for composite IQ. Visual contributes only at 30 samples; missing scores are never zero. Task coverage is a separate quality measure.",
+          threshold: "GPT-6.1 Sol and GPT-6 Sol/Luna need 30 valid software samples for composite IQ. Visual contributes only at 30 samples; missing scores are never zero. Task coverage is a separate quality measure.",
           title: "Codex Radar", subtitle: "Model benchmarks · Cost × IQ", metric: "Metric",
           combined: "Combined cost × IQ", time: "Time cost × IQ", price: "Price cost × IQ",
           efficient: "Upper-left is more efficient", source: "Source: Codex Radar ↗",
@@ -528,7 +539,7 @@ SCRIPT = r"""
           coverage: "独立题", generation: "模型代际", benchmark: "评测维度", insufficient: "数据不足", softwareOnly: "仅软件工程",
           lowCoverage: "独立题覆盖 <60%", unknownCoverage: "覆盖率未知", samples: "样本数 SWE / 视觉",
           noPlot: "当前分组在此指标下暂无可绘制的数据。", median: "费用中位数", mean: "平均费用", weighted: "加权费用", unknown: "费用",
-          threshold: "GPT-6 Sol/Luna 的软件工程样本达到 30 份后可显示综合分；视觉样本达到 30 份才参与加权，缺失不计零。独立题覆盖率是另外的质量指标。",
+          threshold: "GPT-6.1 Sol 和 GPT-6 Sol/Luna 的软件工程样本达到 30 份后可显示综合分；视觉样本达到 30 份才参与加权，缺失不计零。独立题覆盖率是另外的质量指标。",
           title: "Codex Radar", subtitle: "模型评测 · 成本 × IQ", metric: "切换指标",
           combined: "综合成本 × IQ", time: "时间成本 × IQ", price: "费用成本 × IQ",
           efficient: "越靠左上越高效", source: "来源：Codex Radar ↗",
@@ -552,7 +563,7 @@ SCRIPT = r"""
         : v >= .01 ? v.toFixed(2) : v >= .0001 ? v.toFixed(4) : v.toExponential(1);
       const date = (v) => v ? new Date(v).toLocaleString(lang === "zh" ? "zh-CN" : "en-GB", {month:"short", day:"numeric", hour:"2-digit", minute:"2-digit", timeZoneName:"short"}) : "—";
       function coverageText(p) {
-        if (!p.model.startsWith('gpt-6-')) return '';
+        if (!generationModels.gpt6.includes(p.model)) return '';
         const ratio=(n,total)=>n==null||total==null||total<=0?'—':`${fmt(n)}/${fmt(total)}`;
         const parts=[];
         if(mode!=='visual') parts.push(`SWE ${t('coverage')} ${ratio(p.software_covered_tasks,p.software_benchmark_tasks)}`);
@@ -561,7 +572,7 @@ SCRIPT = r"""
       }
       const pointText = (p) => `${models[p.model][0]} · ${p.effort} · IQ ${fmt(p.iq)} · ${t("cost")} ${fmt(p.combined_cost_index)} · ${t(p.price_aggregation || "unknown")} $${fmt(p.average_price_usd)} · ${fmt(p.average_minutes)} ${t("minutes")} · ${t("samples")} ${fmt(p.software_samples)} / ${fmt(p.visual_samples)}${mode === "comprehensive" && p.score_basis === "software" ? " · " + t("softwareOnly") : ""}${coverageText(p) ? " · " + coverageText(p) : ""}`;
       function quality(p) {
-        if (!p.model.startsWith('gpt-6-')) return '';
+        if (!generationModels.gpt6.includes(p.model)) return '';
         const components = [];
         if (mode !== 'visual') components.push([p.software_covered_tasks, p.software_benchmark_tasks]);
         if (mode !== 'software') components.push([p.visual_samples, p.visual_benchmark_tasks]);
@@ -569,10 +580,10 @@ SCRIPT = r"""
         return components.some(([n,total]) => n / total < .6) ? t('lowCoverage') : '';
       }
       function cards(points, data) {
-        return Object.entries(models).filter(([model]) => model.startsWith(generation === 'gpt6' ? 'gpt-6-' : 'gpt-5.')).map(([model,[name,color]]) => {
+        return Object.entries(models).filter(([model]) => generationModels[generation].includes(model)).map(([model,[name,color]]) => {
           const rows=points.filter(p => p.model===model);
-          const expected=['gpt-6-sol','gpt-6-luna'].includes(model)
-            ? efforts.filter(e=>model!=='gpt-6-luna'||e!=='ultra') : rows.map(p=>p.effort);
+          const expected=thresholdModels.includes(model)
+            ? modelEfforts[model] : rows.map(p=>p.effort);
           if (!expected.length) return '';
           return `<div class="radar-family"><h3>${name}</h3><div class="radar-scores">${expected.slice().reverse().map(effort=>{
             const p=rows.find(p=>p.effort===effort);
@@ -658,7 +669,7 @@ SCRIPT = r"""
         const activeSummary=root.contains(focused) && focused.matches('summary');
         const p=payload, data=p?.data;
         const view=data?.views?.[mode];
-        const points=(view?.points || (mode==='comprehensive' ? data?.points : []) || []).filter(p=>p.model.startsWith(generation==='gpt6'?'gpt-6-':'gpt-5.'));
+        const points=(view?.points || (mode==='comprehensive' ? data?.points : []) || []).filter(p=>generationModels[generation].includes(p.model));
         visiblePoints=points;
         const warning=localError ? t("failed") : p?.stale ? t("stale") : p?.cache_warning ? t("cache") : "";
         const meta=p ? `${t("cadence")} · ${t("sync")}: ${date(p.fetched_at)} · ${t("through")}: ${date(view?.source_updated_at || data?.source_updated_at)} · ${t("next")}: ${date(p.next_attempt_at)}` : t("cadence");
@@ -733,6 +744,12 @@ SCRIPT = r"""
       };
     })();
 """
+
+
+# Keep renderer grouping, supported efforts and eligibility aligned with collection.
+SCRIPT = (SCRIPT.replace("__RADAR_GENERATIONS__", json.dumps(MODEL_GROUPS))
+          .replace("__RADAR_MODEL_EFFORTS__", json.dumps(MODEL_EFFORTS))
+          .replace("__RADAR_THRESHOLD_MODELS__", json.dumps(sorted(NEW_GPT6))))
 
 
 def main() -> None:
