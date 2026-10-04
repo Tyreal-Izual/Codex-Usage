@@ -1,5 +1,9 @@
 # Codex Usage
 
+> Archived CLI guide for the upstream-derived `codex_usage.py`. The layout and
+> screenshots below describe the original CLI project. For the current combined
+> dashboard, setup, and tests, see [README.md](README.md).
+
 Codex Usage is a local command-line tool for people who want a clear view of their Codex reset credits, rate-limit windows, local usage metadata, read-only online usage/profile data and optional OpenAI API organisation usage.
 
 The project is intentionally small: one Python file, no package install and no third-party Python dependencies. The core Codex reports do not need an OpenAI API key. The optional `api-usage` report uses `OPENAI_ADMIN_KEY` when you choose that report.

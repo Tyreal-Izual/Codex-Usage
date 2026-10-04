@@ -24,6 +24,8 @@ Codex Radar 成本与 IQ 曲线。程序只使用 Python 标准库，默认仅�
 点击缩略图可查看完整尺寸。截图更新于 **2026-09-16**，由真实界面渲染。
 用量、项目和服务状态使用示例数据；Radar 曲线使用公开评测的缓存快照。
 截图用于展示功能，不代表实时账户用量、官方评分或当前服务状态。
+Radar 截图早于 GPT-6/GPT-5 分组、评测视图及 GPT-6.1 评分卡片的更新；
+当前行为请参阅 [Codex Radar 评测曲线](#codex-radar-评测曲线)。
 
 <!-- markdownlint-disable MD033 -- 使用 HTML 让 GitHub 截图画廊保持紧凑。 -->
 <p>
@@ -385,6 +387,23 @@ python3 codex_usage.py export --report all --format json
 上游派生的 Codex 采集器使用了部分未公开的 Codex 订阅接口，这些接口未来可能变化。
 所有数值都应视为运行状态参考，而不是正式账单。请勿提交 API key、`auth.json`、私有
 导出文件、账户缓存或包含敏感信息的截图。
+
+## 开发与测试
+
+在仓库目录运行完整回归测试，或只检查 Radar：
+
+```sh
+python3 -B -m unittest discover -v
+python3 -B -m unittest test_codex_radar -v
+```
+
+测试使用临时文件、合成评测数据、模拟的上游请求，以及绑定随机本机端口的 HTTP
+服务，不需要账户凭据或在线评测服务。在沙箱中执行时，需要允许绑定本机端口。
+
+运行仪表盘不需要 Node.js；执行 JavaScript 渲染器回归测试则需要 `PATH` 中有
+Node.js。缺少它时，`unittest` 会将这些测试标为跳过，判断测试是否完整通过时需
+留意跳过项。测试覆盖采集规则、缓存恢复、接口访问、刷新调度和部分渲染行为；
+界面变更后的浏览器布局、滚动及减少动态效果的实际外观仍需人工检查。
 
 ## 文档
 

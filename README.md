@@ -31,6 +31,9 @@ these screenshots show the interface with illustrative usage, project,
 and service-status data. The Radar chart uses a cached public benchmark snapshot.
 They are feature examples, not live account usage, official ratings, or current
 service-status reports.
+The Radar screenshot predates the GPT-6/GPT-5 tabs, benchmark views, and GPT-6.1
+score cards; see [Codex Radar benchmark curves](#codex-radar-benchmark-curves)
+for the current behaviour.
 
 <!-- markdownlint-disable MD033 -- HTML keeps the screenshot gallery compact on GitHub. -->
 <p>
@@ -460,6 +463,27 @@ undocumented and may change. Treat all displayed values as operational
 information rather than a contractual billing statement. Do not commit API
 keys, `auth.json`, private exports, cached account data, or sensitive
 screenshots.
+
+## Development and tests
+
+Run the regression suite from the repository directory:
+
+```sh
+python3 -B -m unittest discover -v
+python3 -B -m unittest test_codex_radar -v
+```
+
+Tests use temporary files, synthetic benchmark data, mocked upstream requests,
+and local HTTP servers on ephemeral loopback ports. They do not require account
+credentials or live benchmark services. Allow local port binding when running
+them in a sandbox.
+
+Node.js on `PATH` is optional for running the dashboard, but required for the
+JavaScript renderer regression tests; `unittest` reports those tests as skipped
+when Node.js is absent. Check for skips before treating a run as complete.
+Tests cover collection rules, cache recovery, API access, refresh scheduling,
+and selected renderer behaviour. Browser layout, scrolling, and reduced-motion
+appearance still need manual checks after interface changes.
 
 ## Documentation
 

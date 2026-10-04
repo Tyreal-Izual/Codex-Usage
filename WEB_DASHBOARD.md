@@ -1,47 +1,11 @@
 # Codex & Claude Code Local Web Dashboard
 
-这个文档记录本仓库新增的本地网页仪表盘。原来的 `codex_usage.py`
-命令行工具保持不变；Claude Code 采集与可选后台刷新放在独立的 `claude_usage.py`、
-`claude_usage_statusline.py` 和 `claude_usage_refresher.py` 中，网页版本
-`codex_claude_usage_web.py` 合并展示两类数据。
+本文说明当前网页的操作、页面结构和本地接口。完整安装、配置、数据口径和测试
+命令见 [中文 README](README.zh-CN.md)；原 Codex CLI 用法见
+[保留的 CLI 文档](README_OLD.md)。
 
-## 这次新增了什么
-
-- 新增 `codex_claude_usage_web.py`，启动一个本机可看的 HTTP 网页服务。
-- 默认只监听 `127.0.0.1`，避免把用量数据暴露到局域网。
-- 不需要额外安装第三方 Python 包，只使用标准库和原项目代码。
-- 页面会按设定间隔自动刷新，也可以手动点击刷新。
-- 新增深色背景界面。
-- 新增 English / 中文 Chinese 语言切换，并记住上次选择。
-- `Codex Online Rate Limits` 放在页面最上方。
-- `Codex Online Rate Limits` 显示 primary / weekly 还剩多少百分比，而不是已使用多少。
-- `Codex Online Rate Limits` 始终保留 primary 和 weekly 两个窗口的位置。后端暂时
-  取消其中一个窗口时，该位置及对应的 reset 倒计时会显示 `-` 占位；另一个
-  窗口仍显示实际数据。例如暂时没有 5h 限制但仍有 weekly 限制时，左侧
-  primary 保留占位，右侧 weekly 显示 weekly 数据。
-- reset 倒计时使用天、小时、分钟格式，例如 `6 days 3 hr 12 min`
-  或 `6 天 3 小时 12 分钟`。
-- 移除了顶部那组概览小方框，让页面更紧凑。
-- `Codex Profile Statistics` 和 `Codex Daily Local Usage` 放在同一行，并保持卡片高度对齐。
-- `Codex Daily Local Usage` 改成类似 GitHub contributions 的格子热力图。
-- 只保留 `Codex Models`，移除了重复的
-  `Models in session metadata`。
-- `Codex Models` 顶部使用堆叠条形图展示不同模型 token 占比。
-- `Codex Models` 表格增加颜色标识和 `Share` 百分比列。
-- `Codex Models` 与 `Claude Code Models` 的标题会在对应本地数据有可用时间戳时显示
-  相对更新时间（例如 `Updated <1 min`）；没有时间戳时不显示空占位。
-- `Codex Reset Credits` 标题中的获取时间同样使用相对时间，避免占用标题空间的完整日期。
-- `Codex Online Rate Limits` 详情区域改成 4 列，在小屏幕上会自动变成 2 列或 1 列。
-- 新增 Isambard 服务状态报告，也会显示在总览中：当前服务状态紧凑显示；计划维护
-  是状态区域内的可点击入口，会在独立的本地详情页展示。正常自动刷新会复用五分钟
-  本地缓存，手动点击刷新会请求公开状态页面。抓取失败时会显示上次成功结果。
-- 新增 Claude Code 独立报告和总览区域：5 小时/7 天剩余额度、本地 token 总量、
-  每日热力图、模型、项目和最高用量 session。
-- 新增 macOS 可选后台刷新器：在临时空白会话中执行本地 `/usage`，只解析限额百分比
-  与 reset 时间并写入筛选后的快照；可通过 LaunchAgent 每 10 分钟运行一次，且不向
-  模型发送 prompt。
-- Claude JSONL 中同一响应可能重复出现，统计时按 `requestId + message.id` 去重，
-  并递归包含 subagent JSONL。
+网页入口为 `codex_claude_usage_web.py`，Codex、Claude Code、Isambard 和 Radar
+采集分别保留在独立模块中。服务默认监听 `127.0.0.1`，只使用 Python 标准库。
 
 ## 运行方法
 
@@ -159,7 +123,7 @@ http://127.0.0.1:8765/isambard-maintenance
 | `Claude Code Local Token Totals` | 去重后的输入、输出、缓存创建、缓存读取和总 token |
 | `Claude Code Models` / `Claude Code Projects` / `Claude Code Daily Usage` / `Claude Code Top Sessions` | Claude 本地 JSONL 的模型、项目、每日和 session 排行 |
 | `Isambard Service Status` | 公开 Isambard 服务状态；标题行显示缓存时长和计划维护入口，入口会打开二级详情页 |
-| `Codex Reset Credits` | 本地可读的 reset credits 信息 |
+| `Codex Reset Credits` | 通过 Codex 只读在线接口获取的 reset credits 信息 |
 | `Codex Local Token Totals` | 从本地 session 文件统计出的 token 总量 |
 | `Codex Models` | 从本地 thread 数据库按模型聚合，包含堆叠条形图、颜色标识和占比 |
 | `Codex Radar` | 总览和 Codex 详情中的成本 / 耗时 / 费用 × IQ 曲线、同步年龄、四小时后台更新与缓存回退 |
@@ -233,13 +197,17 @@ JSON 数据接口：
 
 ```text
 GET /api/usage
+GET /api/codex-radar
 ```
 
-该接口需要浏览器会话 Cookie；命令行调用可复制启动链接中的令牌，并通过
-`Authorization: Bearer <令牌>` 请求。服务重启后旧令牌立即失效。强制刷新还需要
-使用 POST 并发送 `X-Codex-Usage-Action: force-refresh`，且每 30 秒最多启动一次。
+两个接口均需要浏览器会话 Cookie；命令行调用可复制启动链接中的令牌，并通过
+`Authorization: Bearer <令牌>` 请求。服务重启后旧令牌立即失效。
 
-常用 query 参数：
+`/api/codex-radar` 只返回后台内存快照，不接受强制抓取参数。
+`/api/usage` 的 Isambard 强制刷新需要使用 POST 并发送
+`X-Codex-Usage-Action: force-refresh`，且每 30 秒最多启动一次。
+
+`/api/usage` 常用 query 参数：
 
 | 参数 | 作用 | 默认值 |
 | --- | --- | --- |

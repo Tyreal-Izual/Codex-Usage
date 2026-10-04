@@ -165,8 +165,9 @@ class CurrentRadarRulesTest(unittest.TestCase):
         result = radar.combine_snapshots(software, visual)
         self.assertGreater(len(result["points"]),30)
         self.assertTrue(radar.validate_snapshot(result))
-        for prefix in ("gpt-6-", "gpt-5."):
-            self.assertEqual(max(p["combined_cost_index"] for p in result["points"] if p["model"].startswith(prefix)),100)
+        self.assertEqual(len(result["points"]), 46)  # 8 families; 6.1 Sol/Luna have no ultra
+        for models in radar.MODEL_GROUPS.values():
+            self.assertEqual(max(p["combined_cost_index"] for p in result["points"] if p["model"] in models),100)
 
     def test_distinct_coverage_is_not_derived_from_sample_count(self):
         result = radar.combine_snapshots(*self.payloads(90, 30), coverage={("gpt-6-sol","high"):(20,112)})
@@ -378,7 +379,7 @@ class ServiceTest(unittest.TestCase):
         self.assertIsNotNone(service.snapshot()["cache_warning"])
 
     def test_missing_measurement_fields_in_cache_do_not_break_startup(self):
-        for version in (1, radar.CACHE_VERSION):
+        for version in (1, 2, radar.CACHE_VERSION):
             for field in ("average_price_usd", "average_minutes", "combined_cost_index"):
                 with self.subTest(version=version, field=field):
                     snapshot = radar.combine_snapshots(*fixtures())
@@ -468,36 +469,77 @@ class CoverageContractTest(unittest.TestCase):
             with self.assertRaises(ValueError): radar.fetch_json(radar.COVERAGE_URL)
 
 
-@unittest.skipUnless(shutil.which("node"), "Node.js is needed for the SVG axis regression test")
-class ChartAxisTest(unittest.TestCase):
+@unittest.skipUnless(shutil.which("node"), "Node.js is needed for renderer regression tests")
+class RadarRendererTest(unittest.TestCase):
+    def render_script(self, script):
+        # Execute the actual pure renderer helpers; no browser or account state.
+        start = radar.SCRIPT.index("      const models =")
+        end = radar.SCRIPT.index("      function render()")
+        return subprocess.run(
+            [shutil.which("node")], input=radar.SCRIPT[start:end] + "\n" + script,
+            text=True, capture_output=True, check=True, timeout=5,
+        ).stdout
+
     def test_gpt61_frontend_group_and_placeholder_efforts_match_collector(self):
-        start=radar.SCRIPT.index("      const models =")
-        end=radar.SCRIPT.index("      function render()")
-        source=radar.SCRIPT[start:end]
-        source+='\nprocess.stdout.write(JSON.stringify({models:Object.keys(models), groups:generationModels, efforts:modelEfforts, html:cards([], {})}));'
-        output=subprocess.run([shutil.which("node")],input=source,text=True,capture_output=True,check=True,timeout=5).stdout
+        output=self.render_script('''
+          const views = ['comprehensive', 'software', 'visual'].map(value => {
+            mode=value;
+            generation='gpt6'; const gpt6=cards([], {});
+            generation='gpt5'; return {gpt6, gpt5:cards([], {})};
+          });
+          process.stdout.write(JSON.stringify({models:Object.keys(models), groups:generationModels, views}));
+        ''')
         result=json.loads(output)
         self.assertEqual(set(result["models"]),set(radar.MODEL_NAMES))
         self.assertIn("gpt-6.1-sol",result["groups"]["gpt6"])
         self.assertNotIn("gpt-6.1-sol",result["groups"]["gpt5"])
-        self.assertEqual(result["efforts"]["gpt-6.1-sol"],list(radar.EFFORTS[:-1]))
-        self.assertIn("GPT-6.1 Sol",result["html"])
+        for view in result["views"]:
+            families=ET.fromstring('<root>'+view["gpt6"]+'</root>')
+            family=next(f for f in families if f.findtext('h3')=='GPT-6.1 Sol')
+            scores=family.findall('./div/div')
+            self.assertEqual([s.text for s in scores], ['max', 'xhigh', 'high', 'medium', 'low'])
+            self.assertTrue(all(s.findtext('strong')=='—' for s in scores))
+            self.assertTrue(all(s.findtext('small')=='Insufficient data' for s in scores))
+            self.assertNotIn('GPT-6.1 Sol', view["gpt5"])
+
+    def test_gpt61_eligible_scores_render_as_cards_and_chart_points(self):
+        software, visual = fixtures()
+        for payload, weight in ((software, 'total'), (visual, 'valid_tasks')):
+            template = payload['points'][0]
+            payload['points'].extend({**template, 'model':'gpt-6.1-sol', 'effort':effort,
+                                      weight:30} for effort in ('low', 'medium', 'high', 'xhigh', 'max'))
+        snapshot = radar.combine_snapshots(software, visual)
+        output = self.render_script('const data='+json.dumps(snapshot)+''';
+          root={clientWidth:1000};
+          const views=Object.entries(data.views).map(([name, view])=>{
+            mode=name;
+            visiblePoints=view.points.filter(p=>generationModels.gpt6.includes(p.model));
+            return {cards:cards(visiblePoints,data), chart:chart(visiblePoints)};
+          });
+          process.stdout.write(JSON.stringify(views));
+        ''')
+        for view in json.loads(output):
+            families=ET.fromstring('<root>'+view['cards']+'</root>')
+            family=next(f for f in families if f.findtext('h3')=='GPT-6.1 Sol')
+            buttons=family.findall('./div/button')
+            self.assertEqual(len(buttons), 5)
+            svg=ET.fromstring(view['chart'])
+            labels=[p.get('aria-label') for p in svg.findall('g')]
+            for button in buttons:
+                self.assertIn(button.get('aria-label'), labels)
+                self.assertNotEqual(button.findtext('strong'), '—')
+            self.assertNotIn('NaN', view['chart'])
+            self.assertNotIn('Infinity', view['chart'])
 
     def test_two_distinct_costs_have_unique_ticks_and_use_full_plot_width(self):
-        # Execute the real chart renderer without a browser. The surrounding
-        # helpers are pure until render(), so only its width input is stubbed.
-        start = radar.SCRIPT.index("      const models =")
-        end = radar.SCRIPT.index("      function render()")
-        renderer = radar.SCRIPT[start:end]
         for costs in ((1, 100), (1, 1, 100)):
             with self.subTest(costs=costs):
                 points = [{"model": "gpt-6-astra", "effort": radar.EFFORTS[i], "iq": 90 + i * 5,
                            "average_price_usd": cost, "average_minutes": 10,
                            "combined_cost_index": cost} for i, cost in enumerate(costs)]
-                source = renderer + "\nroot={clientWidth:1000}; visiblePoints=" + json.dumps(points)
+                source = "root={clientWidth:1000}; visiblePoints=" + json.dumps(points)
                 source += "; process.stdout.write(chart(visiblePoints));"
-                output = subprocess.run([shutil.which("node")], input=source, text=True,
-                                        capture_output=True, check=True, timeout=5).stdout
+                output = self.render_script(source)
                 svg = ET.fromstring(output)
                 ticks = []
                 for element in svg.findall("text"):
