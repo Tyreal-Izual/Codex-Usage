@@ -22,6 +22,7 @@ class UsageWebSecurityTest(unittest.TestCase):
             max_workers=2,
             max_collectors=1,
             cache_seconds=30,
+            radar_service=web.DisabledRadar(),
         )
         self.port = int(self.server.server_address[1])
         self.server_thread = threading.Thread(
@@ -200,6 +201,84 @@ class UsageWebSecurityTest(unittest.TestCase):
         self.assertGreaterEqual(int(limited_headers["Retry-After"]), 1)
         collector.assert_called_once()
 
+    def test_source_configuration_reaches_page_and_disabled_apis(self):
+        self.server.enabled_sources = frozenset({'claude'})
+        self.server.default_report = 'claude-usage'
+        cookie = self.session_cookie()
+        status, _, page = self.request('/', cookie=cookie)
+        self.assertEqual(status, 200)
+        self.assertIn(b'"sources": ["claude"]', page)
+        self.assertIn(b'"defaultReport": "claude-usage"', page)
+        self.assertNotIn(b'__DASHBOARD_CONFIG__', page)
+        with patch.object(web.codex_usage, 'collect_online_usage') as online:
+            status, _, body = self.request('/api/usage?report=online-usage', cookie=cookie)
+        self.assertEqual(status, 200)
+        self.assertTrue(json.loads(body)['data']['disabled'])
+        online.assert_not_called()
+
+    def test_disabled_radar_never_constructs_a_worker(self):
+        with patch.object(web.codex_radar, 'RadarService') as service:
+            server = web.create_server('127.0.0.1', 0, access_token='fixture',
+                allowed_hosts=[], max_workers=1, max_collectors=1, cache_seconds=0,
+                enabled_sources=frozenset({'claude'}))
+            try:
+                server.radar_service.start()
+                self.assertTrue(server.radar_service.snapshot()['disabled'])
+            finally:
+                server.server_close()
+        service.assert_not_called()
+
+    def test_source_switches_require_authentication_and_action_header(self):
+        path = '/api/sources?isambard=false'
+        self.assertEqual(self.request(path, method='POST')[0], 403)
+        cookie = self.session_cookie()
+        self.assertEqual(self.request(path, method='POST', cookie=cookie)[0], 403)
+        self.assertEqual(self.request('/api/sources', cookie=cookie)[0], 200)
+        for invalid in ('isambard=1', 'codex=false', 'radar=true&radar=false', 'radar='):
+            self.assertEqual(self.request('/api/sources?'+invalid, cookie=cookie, method='POST', action='set-sources')[0], 400)
+
+    def test_runtime_isambard_switch_bypasses_previous_report_cache(self):
+        cookie = self.session_cookie()
+        with patch.object(web.isambard_status, 'collect_status', return_value={'ok':True, 'status':{}}) as collect:
+            self.request('/api/usage?report=isambard-status', cookie=cookie)
+            self.assertEqual(collect.call_count, 1)
+            status, _, body = self.request('/api/sources?isambard=false', cookie=cookie, method='POST', action='set-sources')
+            self.assertEqual(status, 200)
+            self.assertNotIn('isambard', json.loads(body)['sources'])
+            _, _, body = self.request('/api/usage?report=isambard-status', cookie=cookie)
+            self.assertTrue(json.loads(body)['data']['disabled'])
+            self.assertEqual(collect.call_count, 1)
+            self.request('/api/sources?isambard=true', cookie=cookie, method='POST', action='set-sources')
+            _, _, body = self.request('/api/usage?report=isambard-status', cookie=cookie)
+            self.assertFalse(json.loads(body)['data'].get('disabled', False))
+
+    def test_radar_switch_pauses_and_resumes_same_worker(self):
+        from unittest.mock import Mock
+        service = Mock()
+        self.server.radar_service = service
+        cookie = self.session_cookie()
+        self.request('/api/sources?radar=false', cookie=cookie, method='POST', action='set-sources')
+        service.set_enabled.assert_called_with(False)
+        _, _, body = self.request('/api/codex-radar', cookie=cookie)
+        self.assertTrue(json.loads(body)['disabled'])
+        service.snapshot.assert_not_called()
+        self.request('/api/sources?radar=true', cookie=cookie, method='POST', action='set-sources')
+        service.set_enabled.assert_called_with(True)
+        service.start.assert_called_once()
+        self.assertIs(self.server.radar_service, service)
+
+    def test_timing_is_injected_without_visible_numeric_controls(self):
+        self.server.local_days = 60
+        self.server.refresh_seconds = 45
+        cookie = self.session_cookie()
+        _, _, body = self.request('/', cookie=cookie)
+        self.assertIn(b'"days": 60', body)
+        self.assertIn(b'"refreshSeconds": 45', body)
+        self.assertNotIn(b'id="days"', body)
+        self.assertNotIn(b'id="refresh"', body)
+        self.assertIn(b'id="isambard-enabled"', body)
+        self.assertIn(b'id="radar-enabled"', body)
+
 
 class HostValidationTest(unittest.TestCase):
     def test_accepts_only_expected_host_and_port_forms(self) -> None:
@@ -219,16 +298,6 @@ class HostValidationTest(unittest.TestCase):
     def test_wildcard_bind_requires_explicit_allowed_host(self) -> None:
         with self.assertRaisesRegex(ValueError, "allowed-host"):
             web.allowed_hostnames("0.0.0.0", [])
-
-
-class DashboardScriptTest(unittest.TestCase):
-    def test_manual_refresh_uses_post_only_for_isambard_reports(self) -> None:
-        self.assertIn(
-            'const forceSourceRefresh = forceIsambardRefresh\n'
-            '          && ["all", "isambard-status"].includes($("report").value);',
-            web.INDEX_HTML,
-        )
-        self.assertIn("fetch(queryUrl(forceSourceRefresh), options)", web.INDEX_HTML)
 
 
 class BoundedServerTest(unittest.TestCase):

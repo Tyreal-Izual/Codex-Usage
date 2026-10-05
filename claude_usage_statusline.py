@@ -11,46 +11,22 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import os
 import shlex
 import sys
-import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-
-def resolve_claude_home() -> Path:
-    configured = os.environ.get("CLAUDE_CONFIG_DIR")
-    return Path(configured).expanduser() if configured else Path.home() / ".claude"
+from usage_common import atomic_write_json, resolve_claude_home, resolve_snapshot_path
 
 
 def snapshot_path() -> Path:
-    configured = os.environ.get("CLAUDE_USAGE_SNAPSHOT")
-    return Path(configured).expanduser() if configured else resolve_claude_home() / "usage-dashboard.json"
+    return resolve_snapshot_path()
 
 
 def command_text() -> str:
     return " ".join((shlex.quote(sys.executable), shlex.quote(str(Path(__file__).resolve()))))
-
-
-def atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
-    temporary = Path(temporary_name)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump(payload, handle, ensure_ascii=False, indent=2)
-            handle.write("\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, path)
-    finally:
-        try:
-            temporary.unlink()
-        except FileNotFoundError:
-            pass
 
 
 def finite_number(value: Any) -> float | None:

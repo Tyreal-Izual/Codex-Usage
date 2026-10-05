@@ -6,9 +6,9 @@
 
 Codex Usage is a local command-line tool for people who want a clear view of their Codex reset credits, rate-limit windows, local usage metadata, read-only online usage/profile data and optional OpenAI API organisation usage.
 
-The project is intentionally small: one Python file, no package install and no third-party Python dependencies. The core Codex reports do not need an OpenAI API key. The optional `api-usage` report uses `OPENAI_ADMIN_KEY` when you choose that report.
+The project needs no package install and no third-party Python dependencies. Keep the whole checkout together: shared helpers now live alongside the entry-point script. The core Codex reports do not need an OpenAI API key. The optional `api-usage` report uses `OPENAI_ADMIN_KEY` when you choose that report.
 
-Use it to see how many reset credits are available, when they expire in your local timezone, whether visible rate-limit windows are close to their limit, what local Codex metadata says about sessions, models, days and token totals, and what the OpenAI Admin API reports for organisation API usage and costs. You can export the same reports as TXT, JSON or CSV files beside the script.
+Use it to see how many reset credits are available, when they expire in your local timezone, whether visible rate-limit windows are close to their limit, what local Codex metadata says about sessions, models, days and token totals, and what the OpenAI Admin API reports for organisation API usage and costs. You can export the same reports as TXT, JSON or CSV files in `~/Downloads/codex-usage` (or `--output-dir`).
 
 This is not an official OpenAI or Codex tool. It does not redeem credits, buy credits, change your Codex or ChatGPT account, change Codex settings, or upload local transcripts. The Codex online data comes from undocumented ChatGPT/Codex backend endpoints, so treat it as useful operational information rather than a contractual billing statement. The optional `api-usage` report uses documented OpenAI Admin API endpoints for API organisation usage and costs; it is not ChatGPT or Codex subscription billing.
 
@@ -22,7 +22,7 @@ This is not an official OpenAI or Codex tool. It does not redeem credits, buy cr
 
 No third-party Python packages are required. By default, Codex Usage reads Codex data from `Path.home() / ".codex"`. Set `CODEX_HOME` to use a different Codex home directory.
 
-The source layout is deliberately small:
+The original source layout was (see [current architecture](docs/development.md) for the updated layout):
 
 ```text
 .gitattributes
@@ -215,7 +215,7 @@ For automation, print machine-readable JSON instead of prose and tables:
 | `./codex_usage.py local-usage` | Shows local Codex metadata and counters only. | No |
 | `./codex_usage.py online-usage` | Shows read-only online usage/profile data. | Yes |
 | `./codex_usage.py api-usage` | Shows optional OpenAI API organisation usage and costs using `OPENAI_ADMIN_KEY`. | Yes |
-| `./codex_usage.py export` | Writes a report beside the script. | Depends on `--report` |
+| `./codex_usage.py export` | Writes a report in `~/Downloads/codex-usage` (or `--output-dir`). | Depends on `--report` |
 
 Shared display switches:
 
@@ -242,7 +242,7 @@ The menu and commands use the same display settings. `top` controls ranked-table
 
 ## Exports
 
-Use `export` when you want to save a report beside the script:
+Use `export` when you want to save a report in `~/Downloads/codex-usage` (or `--output-dir`):
 
 ```sh
 ./codex_usage.py export --report all --format txt

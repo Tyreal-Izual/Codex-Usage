@@ -6,3 +6,7 @@ isambard_status_snapshot.json
 usage-dashboard.json
 usage-dashboard-refresh-state.json
 codex_radar_snapshot.json
+codex_*_report_*.json
+codex_*_report_*.csv
+codex_*_report_*.txt
+exports/

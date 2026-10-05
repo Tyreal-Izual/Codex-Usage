@@ -1,501 +1,104 @@
-<p align="right">
-  <strong>English</strong> | <a href="README.zh-CN.md">中文</a>
-</p>
+<p align="right"><strong>English</strong> | <a href="README.zh-CN.md">中文</a></p>
 
 # Codex & Claude Code Usage Dashboard
 
-A local, dependency-free dashboard for Codex and Claude Code usage,
-Isambard service status, and Codex Radar benchmarks in one browser page.
+A local dashboard for subscription limits, token history, models and sessions.
+**Python 3.10+ · no third-party dependencies · one command to start.**
+Codex and Claude Code work independently; public Isambard status and Codex Radar benchmarks are optional.
 
-The dashboard combines subscription rate-limit windows, local token history,
-model and project breakdowns, daily heatmaps, session rankings, optional
-OpenAI Admin API data, Isambard service status, and Codex Radar cost–IQ curves
-refreshed every four hours. It uses only the Python standard library and binds
-to `127.0.0.1` by default.
-
-> This repository is maintained as an independent project, not as a
-> synchronised mirror of its upstream. Its **Codex collection and reporting
-> foundation is derived from
-> [MacSteini/Codex-Usage](https://github.com/MacSteini/Codex-Usage)**. The
-> combined web dashboard, Claude Code support, statusLine bridge, Isambard
-> integration, bilingual interface, and related documentation are additions
-> developed in this project.
-
-This is not an official OpenAI, Anthropic, Codex, Claude Code, or Isambard
-tool.
-
-## Screenshots
-
-Click a thumbnail to open the full-size image. Refreshed on **2026-09-16**,
-these screenshots show the interface with illustrative usage, project,
-and service-status data. The Radar chart uses a cached public benchmark snapshot.
-They are feature examples, not live account usage, official ratings, or current
-service-status reports.
-The Radar screenshot predates the GPT-6/GPT-5 tabs, benchmark views, and GPT-6.1
-score cards; see [Codex Radar benchmark curves](#codex-radar-benchmark-curves)
-for the current behaviour.
-
-<!-- markdownlint-disable MD033 -- HTML keeps the screenshot gallery compact on GitHub. -->
-<p>
-  <a href="img/dashboard/1.jpg"><img src="img/dashboard/1.jpg" alt="Overview with Codex and Claude Code rate limits, relative ages, and Isambard status" width="220"></a>
-  <a href="img/dashboard/2.jpg"><img src="img/dashboard/2.jpg" alt="Codex usage detail with online limits, model age, and profile statistics" width="220"></a>
-  <a href="img/dashboard/3.jpg"><img src="img/dashboard/3.jpg" alt="Claude Code usage detail with rate limits, model age, and local token totals" width="220"></a>
-  <a href="img/dashboard/4.jpg"><img src="img/dashboard/4.jpg" alt="Isambard service status and planned-maintenance link" width="220"></a>
-  <a href="img/dashboard/5.jpg"><img src="img/dashboard/5.jpg" alt="Full Isambard planned-maintenance schedule" width="220"></a>
-  <a href="img/dashboard/6.jpg"><img src="img/dashboard/6.jpg" alt="Narrow rate-limit layout with the floating Back to limits button" width="220"></a>
-  <a href="img/dashboard/7.jpg"><img src="img/dashboard/7.jpg" alt="Codex Radar cost versus IQ chart with title age and four-hour sync metadata" width="220"></a>
-  <a href="img/dashboard/8.jpg"><img src="img/dashboard/8.jpg" alt="Changed numbers highlighted in Claude Code Models and Codex Models" width="220"></a>
-</p>
-<!-- markdownlint-enable MD033 -->
-
-Images 1–5: overview, Codex detail, Claude Code detail, Isambard status, and
-maintenance. Image 6: mobile layout. Image 7: Radar curves. Image 8: model-value
-change highlights (one frame of the animation).
-
-## Project Origin and Attribution
-
-The codebase has two clearly separated origins:
-
-| Area | Origin |
-| --- | --- |
-| `codex_usage.py` and the Codex collection/reporting foundation | Derived from [MacSteini/Codex-Usage](https://github.com/MacSteini/Codex-Usage) and retained as the separate Codex core, with small integration-oriented changes such as a machine-readable retrieval timestamp |
-| Codex results displayed in the browser | Powered by the upstream-derived `codex_usage.py` collector and integrated into this project's web interface |
-| `codex_claude_usage_web.py` and the combined browser UI | Developed in this project |
-| `claude_usage.py`, `claude_usage_statusline.py`, and `claude_usage_refresher.py` | Developed in this project; independent of `codex_usage.py` |
-| `isambard_status.py`, bilingual UI, dashboard layout, and integration logic | Developed in this project |
-| `codex_radar.py` collector, cache worker, and chart component | Developed in this project; benchmark data comes from [Codex Radar](https://codexradar.com/) |
-
-The upstream project is distributed under the MIT License. Its copyright and
-license notice remain in [LICENCE](LICENCE), alongside Frederick Zou's
-copyright notice for this project's additions. The upstream CLI documentation
-is preserved in [README_OLD.md](README_OLD.md).
-
-## Features
-
-- Combined local overview for Codex rate limits, Claude Code rate limits,
-  Isambard status, and Codex/Claude model summaries.
-- Dedicated Codex and Claude Code detail views.
-- Codex Radar combined cost / duration / price versus IQ curves, refreshed by an
-  independent four-hour worker with last-known-good cache fallback.
-- Initial positioning at Codex rate limits and a floating **Back to limits** button.
-- A gentle pulse and four-second highlight for changed limits, balances, reset
-  counts, and model statistics, with reduced-motion support.
-- English and Chinese interface with the language choice retained locally.
-- Compact toolbar with report, language, local-day window, refresh interval,
-  auto-refresh, and manual refresh controls.
-- Compact panel headings for Codex reset summaries, online-data age, Claude
-  snapshot state, model-data age, Radar sync age, Isambard cache age, and
-  planned-maintenance access. Ages are shown relatively (for example, `Updated <1 min`) when a
-  source provides a timestamp.
-- Primary/5-hour and weekly/7-day limit bars with reset countdowns.
-- Local token totals, model shares, daily heatmaps, and top sessions.
-- Claude Code input, output, cache-creation, and cache-read token accounting,
-  deduplicated by request/message identity.
-- Claude Code model, project, session, and daily breakdowns, including subagent
-  JSONL files.
-- Optional macOS background refresh for the Claude Code rate-limit snapshot,
-  without submitting prompts.
-- Optional OpenAI organisation usage and cost data through
-  `OPENAI_ADMIN_KEY`.
-- Isambard service status and planned maintenance, with a five-minute cache
-  and last-known-good fallback.
-- Local JSON API for integrations and automation.
-- Original Codex command-line reports and TXT/JSON/CSV exports.
-
-## Requirements
-
-- Python 3.10 or newer.
-- Local Codex state, normally under `~/.codex`.
-- Local Claude Code transcripts under `~/.claude/projects` for Claude token
-  history.
-- A Codex login in `~/.codex/auth.json` for Codex reset credits and read-only
-  online usage/profile data.
-- `OPENAI_ADMIN_KEY` only for the optional OpenAI Admin API section.
-
-No package installation or third-party Python dependency is required.
-The optional macOS background refresher uses the system-provided
-`/usr/bin/expect` and `launchd`.
-
-## Quick Start
-
-From the repository directory, run:
+## Quick start
 
 ```sh
+git clone https://github.com/Tyreal-Izual/Codex-Usage.git
+cd Codex-Usage
 python3 codex_claude_usage_web.py
 ```
 
-Open the private access URL printed in the terminal. The first request stores an
-`HttpOnly` browser session cookie and redirects to `http://127.0.0.1:8765`, so
-the access token is removed from the address bar. Do not share the printed URL.
+Open the private access URL printed in the terminal. Stop with `Ctrl-C`.
+On Windows, use `py -3` in place of `python3` (Python 3.10+).
+No `pip`, Node.js, build step or API key is needed for the basic dashboard.
 
-Stop the server with `Ctrl-C`. Common options are:
+The default `--sources auto` detects local Codex/Claude installations at startup.
+The **Isambard Status** and **Codex Radar** toolbar checkboxes are checked by default. Use them to toggle service status and benchmarks while the server is running.
+
+| What you use | What you need |
+| --- | --- |
+| Codex only | Local `~/.codex` state; sign in to Codex for online limits |
+| Claude Code only | Local `~/.claude/projects` transcripts; optional limit capture below |
+| Both | Both data directories; each source works independently |
+| Isambard Status / Codex Radar | Enabled by default; use the toolbar checkboxes |
 
 ```sh
-python3 codex_claude_usage_web.py --port 8766
-python3 codex_claude_usage_web.py --refresh 30
-python3 codex_claude_usage_web.py --quiet
-python3 codex_claude_usage_web.py --host 127.0.0.1 --port 8765
+python3 codex_claude_usage_web.py --sources codex --default-report codex-usage
+python3 codex_claude_usage_web.py --sources claude --default-report claude-usage
+python3 codex_claude_usage_web.py --sources all
+python3 codex_claude_usage_web.py --check
 ```
 
-The default host is deliberately local-only. Requests are restricted to known
-Host headers, the data API requires the per-process access capability, and
-simultaneous requests and collectors are bounded. A wildcard bind must name an
-accepted hostname explicitly, for example
-`--host 0.0.0.0 --allowed-host 192.0.2.10`; it may expose the dashboard to other
-devices and should be used with care.
+`--check` prints paths, detected configuration and snapshot presence. It does not
+read credential contents, launch clients, contact services, or write files.
+Sources can also be selected with a comma-separated list: `codex,claude,isambard,radar`.
+Source switches apply to the running server and are shared by its tabs. Restarting restores the startup selection. Local Days and Refresh Seconds are configured only at startup, for example `--days 60 --refresh 30`.
 
-### Updating a running dashboard
+## Optional Claude limit capture
 
-Stop the old process (`Ctrl-C`), run `git pull --ff-only`, then start
-`python3 codex_claude_usage_web.py` again. Open the newly printed access URL.
-A running process does not reload Python edits automatically, and its previous
-access token is no longer valid after a restart.
-
-## Claude Code Setup
-
-### Local token history
-
-No installation step is required for token history. `claude_usage.py` reads
-usage metadata from:
-
-```text
-~/.claude/projects/**/*.jsonl
-```
-
-Prompt text, response text, tool inputs, and file contents are ignored. Claude
-Desktop Code sessions are included when the app writes them to this same
-directory.
-
-### Official 5-hour and 7-day windows
-
-To capture the official subscription windows exposed to Claude Code
-statusLine scripts, register the included bridge once:
+Local token history needs no setup. For 5-hour / 7-day subscription windows:
 
 ```sh
 python3 claude_usage_statusline.py --install
 ```
 
-After a compatible Claude Code client completes a response, the bridge writes
-a sanitised snapshot to:
+Then complete a response in a compatible Claude Code client. The bridge saves a
+sanitized snapshot; browser refresh only reads it. Existing custom status lines
+are preserved unless you explicitly use `--force`.
+See [Claude setup](docs/claude-setup.md) for details, uninstall instructions and
+the optional macOS background refresher (`expect` / `launchd`).
 
-```text
-~/.claude/usage-dashboard.json
-```
+## Common adjustments and troubleshooting
 
-It stores only rate-limit percentages, reset timestamps, model metadata, and
-capture metadata. It does not store prompts or responses. Installation refuses
-to replace a different statusLine unless `--force` is explicitly supplied.
-
-Useful commands:
-
-```sh
-python3 claude_usage.py
-python3 claude_usage.py --json --days 30 --top 10
-python3 claude_usage_statusline.py --status
-python3 claude_usage_statusline.py --uninstall
-```
-
-> Browser auto-refresh only rereads the latest snapshot. Claude Desktop may
-> update local JSONL token history without invoking a custom statusLine. In
-> that case, token charts continue to change while the 5-hour/7-day snapshot
-> becomes stale. The dashboard displays snapshot age and stale state so an old
-> value is not mistaken for live account usage.
-
-The dashboard also runs the local `claude auth status` command and exposes only
-redacted state fields. A successful authenticated check shows a green **CLI
-Login · Logged in** chip. An explicit logged-out result shows a red re-login
-warning only after the rate-limit snapshot is stale or unavailable, with
-`claude auth login` as the recovery command. Missing binaries, timeouts, and
-unrecognised auth output remain neutral instead of producing a false green or
-red status.
-
-### Optional background snapshot refresh on macOS
-
-`claude_usage_refresher.py` opens a temporary empty Claude Code session for this
-repository, runs Claude Code's local `/usage` command, parses only the 5-hour
-and weekly percentages/reset times, writes the same sanitised snapshot format,
-and exits with `Ctrl-D`. `/usage` reads plan limits without submitting a prompt
-to the model. The refresher does not resume a conversation or retain terminal
-output, and it can work independently of the statusLine bridge. Claude Code
-must already be signed in and this repository must have been trusted once.
-For this temporary process only, the refresher disables Remote Control and
-enables Claude's screen-reader output; it does not change the user's global
-settings. It waits up to 30 seconds for an explicit interactive prompt, waits
-one additional second for the prompt to settle, and only then sends `/usage`.
-If the screen updates while local activity is scanned, the parser keeps the
-latest complete, explicitly labelled value for each subscription window. It
-never assigns an unlabelled incremental update to a window by position.
-
-Test one refresh first:
-
-```sh
-python3 claude_usage_refresher.py --once --force
-```
-
-Install a per-user LaunchAgent with reset-aware refresh:
-
-```sh
-python3 claude_usage_refresher.py --install
-python3 claude_usage_refresher.py --status
-```
-
-Remove it with:
-
-```sh
-python3 claude_usage_refresher.py --uninstall
-```
-
-The LaunchAgent performs a lightweight local snapshot check every 60 seconds;
-it does not start Claude Code on every probe. Normal full refreshes remain
-about ten minutes apart. When either stored reset deadline passes, the agent
-waits 30 seconds for account state to settle and then prioritises one refresh,
-so a dashboard stuck at `Resets in now` normally clears within 30–90 seconds.
-A small `usage-dashboard-refresh-state.json` file records only attempt timing,
-the reset timestamp, exit state, and consecutive-failure count. Any failed or
-interrupted full refresh backs off for 5, 10, 20, and then at most 40 minutes,
-so a broken `/usage` parser cannot launch Claude every minute. Available
-subscription windows are parsed independently; one missing or invalid window
-does not discard a valid one. Percentages outside 0–100 are rejected rather
-than clamped. The existing process lock prevents overlap, and a stuck Claude
-process is terminated. Logs remain under `~/.claude/usage-refresh*.log`.
-
-The job runs only while the Mac is awake and logged in. Re-run `--install`
-after upgrading from the older ten-minute scheduler, moving this repository,
-or moving the Claude executable. This is client automation rather than an
-Anthropic background-usage API, so a future Claude Code release may require
-adjustments.
-
-## Dashboard Views and Data Sources
-
-| View | Main contents | Network |
-| --- | --- | --- |
-| Overview (`all`) | Codex/Claude limits, Isambard status, model summaries, and Radar curves | Codex read-only endpoints and public Isambard pages; Radar reads its background cache |
-| Codex Usage (`codex-usage`) | Reset credits, local tokens/models/days/sessions, online profile data, Radar curves, and optional Admin API data | Yes; Radar reads its background cache |
-| Claude Code Usage (`claude-usage`) | Local token totals, models, projects, days, sessions, and the saved statusLine snapshot | No |
-| Isambard Service Status (`isambard-status`) | Current service cards and planned maintenance | Public pages, cached locally |
-
-The table describes per-view collection. The independent Radar worker keeps
-its schedule while the server runs, regardless of the selected report or the
-browser auto-refresh switch.
-
-The full planned-maintenance view is available at:
-
-```text
-http://127.0.0.1:8765/isambard-maintenance
-```
-
-Automatic dashboard refreshes reuse Isambard data for up to five minutes.
-Manual refresh bypasses that cache. If a live request fails, the most recent
-successful result remains visible with a warning.
-
-The main Isambard card keeps source metadata compact: its heading shows cache
-age when cached and a maintenance-window count linking to the full schedule.
-The overview toolbar requests the top 10 ranked rows; API callers can still use
-the `top` query parameter to choose a different limit.
-
-## Navigation and Change Highlights
-
-On opening the Overview or Codex Usage page, the first rendered Codex Online
-Rate Limits card is aligned with the top of the viewport. Later refreshes keep
-your reading position. Scrolling or changing the report during initial loading
-cancels this initial positioning; the toolbar remains accessible by scrolling up.
-A floating **Back to limits** button in the bottom-right corner returns to the
-Codex limit card after scrolling down. It appears when that card is available.
-
-Changed Codex/Claude remaining percentages, Credits balance, and reset counts
-pulse gently once (600 ms) and fade out of a soft highlight over four seconds.
-The Claude Code Models and Codex Models panels use the same effect for per-model
-request/thread counts, tokens, shares, and their total-token/model-count summaries.
-Rows are matched by provider and model name, so reordering alone does not flash.
-
-Only changes to displayed values trigger this cue; initial loads, report/language
-switches, missing values, ages, and countdowns do not. Reduced-motion preferences
-disable the scaling while retaining the highlight. Fast refreshes continue the
-existing effect rather than restarting it.
-
-## Codex Radar benchmark curves
-
-The Overview and Codex Usage views include a full-width **Codex Radar** panel
-immediately below Codex Reset Credits (banked resets). It shows community
-benchmark scores against combined cost, duration, or cost. It defaults to **GPT-6 (Astra, 6.1 Sol, 6 Sol, and Luna)**,
-with a GPT-5 group and separate composite, software-engineering, and visual-spatial
-views. Each view includes score cards and curves. The independent
-`codex_radar.py` module owns collection, calculation, caching, and the chart
-component; the web entry point only mounts it and exposes its cached data.
-The title's Updated badge shows time since the last successful local sync;
-hover over it for the exact sync and source-data timestamps.
-
-While the dashboard server is running, a background worker checks the two public
-benchmark sources and the optional distinct-task coverage endpoint every four
-hours, even with the browser closed. The first run fetches immediately; a restart reuses a fresh disk cache. Sleep or
-offline time can delay updates. Failed refreshes retain the last successful
-snapshot and retry after 15, 30, 60, 120, then at most 240 minutes. The panel
-distinguishes source-data time from local sync time and marks stale results.
-
-The calculation follows Codex Radar's 2026-10-04 display rules:
-
-- GPT-6.1 Sol and GPT-6 Sol/Luna need 30 valid software samples for composite IQ. Visual results
-  contribute only with 30 valid samples of their own; otherwise the score is
-  explicitly marked **Software only**. Missing scores are never treated as zero.
-- GPT-6.1 Sol supports low, medium, high, xhigh, and max (no ultra), sharing
-  the GPT-6 cost scale. Missing source scores show **Insufficient data** until
-  a later background refresh supplies eligible results.
-- Astra and GPT-5 composite scores still require both components. Individual
-  benchmark views remain available independently.
-- Sample counts and distinct-task coverage are separate. Coverage below 60% is
-  flagged; a failed coverage request is shown as unknown without blocking score
-  updates. Quality information describes the last local snapshot.
-- Source costs may be medians; composite costs are weighted by sample counts.
-  They are no longer all labelled as average prices.
-- Cost is proportional to `price * (minutes / 10) ** (log(2.5) / log(1.35))`.
-  The largest cost **within the selected generation and benchmark** is 100;
-  these indexes are not absolute cross-generation prices.
-- A valid IQ remains visible on its card when cost or duration is missing;
-  invalid coordinates are omitted from the corresponding curve.
-
-The horizontal axis remains logarithmic, with a marked compressed gap where
-needed. Legacy caches refresh on startup; failed upgrades retain a stale-marked
-snapshot and back off before retrying. Scores are community benchmarks, not
-account usage or official ratings.
-
-The authenticated `GET /api/codex-radar` endpoint only reads memory; it never
-starts an upstream fetch. Browser refresh controls do not override the four-hour
-schedule. Hover, tap, or keyboard-focus a point for values, or expand the data
-table. English/Chinese follows the dashboard language.
-
-The ignored `codex_radar_snapshot.json` file stores sanitized benchmark data and
-retry timing, with no credentials. A standalone cache update is also available:
-
-```sh
-python3 codex_radar.py                 # update only when due, then print JSON
-python3 codex_radar.py --force         # explicitly refresh the disk cache now
-python3 codex_radar.py --cache /tmp/radar.json
-```
-
-Standalone updates are loaded by the web service on its next restart; the running
-service owns its in-memory snapshot. No LaunchAgent or Codex scheduled task is
-required. Upstream website interfaces may change; incompatible responses leave
-the last valid cache intact.
-
-## Local JSON API
-
-The web server exposes:
-
-```text
-GET /
-GET /isambard-maintenance
-GET /healthz
-GET /api/usage
-GET /api/codex-radar
-```
-
-The API requires the browser session cookie. Command-line clients can instead
-send the token from the startup URL as `Authorization: Bearer <token>`; the
-token changes whenever the server restarts. Forced Isambard refreshes use POST
-with `X-Codex-Usage-Action: force-refresh` and are limited to one start every
-30 seconds.
-
-Example:
-
-```text
-http://127.0.0.1:8765/api/usage?report=codex-usage&top=10&days=30
-```
-
-| Parameter | Meaning | Default |
-| --- | --- | --- |
-| `report` | `all`, `codex-usage`, `claude-usage`, or `isambard-status` | `all` |
-| `top` | Maximum ranked rows | `10` |
-| `days` | Recent local daily window | `30` |
-| `warn_days` | Reset-credit expiry warning window | `7` |
-| `bucket_width` | Admin API bucket width: `1d`, `1h`, or `1m` | `1d` |
-| `limit` | Optional Admin API bucket limit, capped at 1440 | empty |
-| `group_by` | Optional Admin API grouping field; repeat or comma-separate | empty |
-| `no_costs` | Skip the Admin API costs request with `1`, `true`, or `yes` | `false` |
-| `isambard_force_refresh` | Authenticated POST bypass of the Isambard cache; accepts `1`, `true`, or `yes` | `false` |
-
-## Standalone Collectors and Original CLI
-
-The collectors can also be used without the web dashboard:
-
-```sh
-python3 claude_usage.py
-python3 codex_usage.py
-python3 codex_usage.py local-usage --top 20 --days 60
-python3 codex_usage.py export --report all --format json
-```
-
-Running `codex_usage.py` interactively opens its menu. See
-[README_OLD.md](README_OLD.md) for its complete command, export, and
-troubleshooting guide.
-
-## Configuration
-
-| Environment variable | Purpose |
+| Situation | Action |
 | --- | --- |
-| `CODEX_HOME` | Use a Codex data directory other than `~/.codex` |
-| `CLAUDE_CONFIG_DIR` | Use a Claude Code data directory other than `~/.claude` |
-| `CLAUDE_BIN` | Use a specific Claude Code executable for manual refresher runs |
-| `CLAUDE_USAGE_PROJECT_DIR` | Open the refresher's temporary Claude session in another project |
-| `CLAUDE_USAGE_SNAPSHOT` | Store/read the Claude rate-limit snapshot at another path |
-| `CLAUDE_USAGE_STALE_SECONDS` | Override the default 15-minute Claude snapshot stale threshold |
-| `OPENAI_ADMIN_KEY` | Enable optional OpenAI organisation usage and cost queries |
+| Port already in use | Add `--port 8766` |
+| Different refresh interval | Add `--refresh 30` |
+| Missing Codex online limits | Check the configured Codex home and sign in to Codex |
+| Old Claude limit values | Check snapshot age and the [capture setup](docs/claude-setup.md) |
+| Custom data directories | Set `CODEX_HOME` / `CLAUDE_CONFIG_DIR` |
+| Configuration is unclear | Run `python3 codex_claude_usage_web.py --check` |
 
-## Privacy and Limitations
+Update with `git pull --ff-only`, restart the server and open the new printed URL.
+After moving the checkout, reinstall any Claude statusLine / background refresher
+that references its old absolute path.
 
-- The server listens on `127.0.0.1` by default.
-- Codex and Claude transcript/state files are read but not modified; the Claude
-  bridges write only the sanitised usage snapshot and refresher support files.
-- Claude streaming rows are deduplicated before token totals are calculated.
-- The Claude statusLine bridge never reads or reuses Claude OAuth credentials.
-- The optional refresher runs the normal Claude Code client and may perform its
-  usual startup network requests or configured hooks, but sends no prompt and
-  does not resume a conversation or save its terminal output.
-- Codex reset-credit and online-profile requests are read-only.
-- OpenAI Admin API access is optional and uses documented endpoints.
-- Isambard data comes from public status pages; only parsed cache data is kept.
-- Radar requests only public benchmark metadata, sends no local account or
-  conversation data, and stores its snapshot in a Git-ignored cache file.
-- Individual collectors fail independently so one unavailable source does not
-  take down the whole dashboard.
+## Data and privacy
 
-Some Codex subscription endpoints used by the upstream-derived collector are
-undocumented and may change. Treat all displayed values as operational
-information rather than a contractual billing statement. Do not commit API
-keys, `auth.json`, private exports, cached account data, or sensitive
-screenshots.
+The server binds to `127.0.0.1` by default. The startup URL establishes an
+authenticated browser session; keep it private. Reports read usage metadata,
+not displayable conversation contents. Codex online endpoints are unofficial
+and may change. This is not an official OpenAI or Anthropic tool.
 
-## Development and tests
+Public caches live in the user's cache directory; exports default to
+`~/Downloads/codex-usage`. Both are configurable. Source failures are isolated;
+the browser renders completed sections while other sources load.
+See [configuration and API](WEB_DASHBOARD.md) and [privacy details](docs/privacy.md).
 
-Run the regression suite from the repository directory:
+## Documentation and development
+
+- [Screenshots](docs/screenshots.md) · [Radar rules](docs/radar.md)
+- [Configuration, cache locations and local API](WEB_DASHBOARD.md)
+- [Development, tests and architecture](docs/development.md)
+- [Original Codex CLI guide](README_OLD.md)
 
 ```sh
 python3 -B -m unittest discover -v
-python3 -B -m unittest test_codex_radar -v
 ```
 
-Tests use temporary files, synthetic benchmark data, mocked upstream requests,
-and local HTTP servers on ephemeral loopback ports. They do not require account
-credentials or live benchmark services. Allow local port binding when running
-them in a sandbox.
+Node.js is only needed for JavaScript regression tests. Tests use synthetic data
+and local temporary HTTP servers; allow loopback binding and check for skips.
 
-Node.js on `PATH` is optional for running the dashboard, but required for the
-JavaScript renderer regression tests; `unittest` reports those tests as skipped
-when Node.js is absent. Check for skips before treating a run as complete.
-Tests cover collection rules, cache recovery, API access, refresh scheduling,
-and selected renderer behaviour. Browser layout, scrolling, and reduced-motion
-appearance still need manual checks after interface changes.
+## Origin and license
 
-## Documentation
-
-- [README.zh-CN.md](README.zh-CN.md): Chinese version.
-- [WEB_DASHBOARD.md](WEB_DASHBOARD.md): detailed dashboard behaviour and data
-  sources.
-- [README_OLD.md](README_OLD.md): preserved documentation for the
-  upstream-derived Codex CLI.
-
-## License
-
-This project is distributed under the MIT License. See [LICENCE](LICENCE).
-The upstream-derived Codex implementation retains MacSteini's copyright
-notice; the dashboard, Claude Code, Isambard, and integration additions are
-copyright (c) 2026 Frederick Zou.
+The Codex collection/reporting core in `codex_usage.py` derives from
+[MacSteini/Codex-Usage](https://github.com/MacSteini/Codex-Usage).
+This is an independently maintained project. The combined dashboard, Claude
+support, Isambard and Radar integration are additions by Frederick Zou.
+Both copyright notices are retained in the [MIT license](LICENCE).

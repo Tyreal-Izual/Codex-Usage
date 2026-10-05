@@ -17,7 +17,6 @@ import json
 import math
 import os
 import shlex
-import shutil
 import subprocess
 import sys
 import threading
@@ -25,6 +24,8 @@ from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from usage_common import resolve_claude_home, resolve_snapshot_path, find_claude_binary
 
 
 TOKEN_FIELDS = (
@@ -38,29 +39,11 @@ DEFAULT_STALE_SECONDS = 15 * 60
 CLAUDE_AUTH_TIMEOUT_SECONDS = 5
 
 
-def resolve_claude_home() -> Path:
-    configured = os.environ.get("CLAUDE_CONFIG_DIR")
-    if configured:
-        return Path(configured).expanduser()
-    return Path.home() / ".claude"
-
-
 CLAUDE_HOME = resolve_claude_home()
-
-
-def resolve_snapshot_path(claude_home: Path | None = None) -> Path:
-    configured = os.environ.get("CLAUDE_USAGE_SNAPSHOT")
-    if configured:
-        return Path(configured).expanduser()
-    return (claude_home or CLAUDE_HOME) / "usage-dashboard.json"
 
 
 def local_now_text() -> str:
     return datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z %z")
-
-
-def iso_now_utc() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 def parse_timestamp(value: Any) -> datetime | None:
@@ -429,21 +412,8 @@ def statusline_is_installed(claude_home: Path) -> bool:
 
 
 def claude_binary_path() -> str | None:
-    configured = os.environ.get("CLAUDE_BIN")
-    candidates = [
-        configured,
-        shutil.which("claude"),
-        str(Path.home() / ".local" / "bin" / "claude"),
-        "/opt/homebrew/bin/claude",
-        "/usr/local/bin/claude",
-    ]
-    for value in candidates:
-        if not value:
-            continue
-        candidate = Path(value).expanduser()
-        if candidate.is_file() and os.access(candidate, os.X_OK):
-            return str(candidate)
-    return None
+    path = find_claude_binary()
+    return str(path) if path else None
 
 
 def claude_auth_status() -> dict[str, Any]:

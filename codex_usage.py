@@ -7,9 +7,9 @@ Repository: https://github.com/MacSteini/Codex-Usage
 Author: MacSteini
 Licence: MIT
 
-A single-file command-line tool for Codex users. It shows reset credits,
+A standard-library command-line tool for Codex users. It shows reset credits,
 rate-limit windows, local usage metadata, read-only online usage/profile data,
-and report exports beside the script.
+and report exports to a configurable output directory.
 
 It uses the existing Codex login at auth.json inside the Codex home directory.
 It does not require an OpenAI API key. It does not print auth tokens, account
@@ -19,6 +19,8 @@ or secrets.
 
 from __future__ import annotations
 
+from usage_common import CollectionError, export_directory
+import threading
 import argparse
 import contextlib
 import csv
@@ -50,8 +52,7 @@ def resolve_codex_home() -> Path:
 
 CODEX_HOME = resolve_codex_home()
 AUTH_PATH = CODEX_HOME / "auth.json"
-SCRIPT_DIR = Path(__file__).resolve().parent
-EXPORT_DIR = SCRIPT_DIR
+EXPORT_DIR = export_directory()
 API_BASE = "https://chatgpt.com/backend-api"
 ADMIN_API_BASE = "https://api.openai.com/v1"
 ORIGINATOR = "Codex Desktop"
@@ -105,8 +106,7 @@ COLOR_ENABLED = sys.stdout.isatty() and os.environ.get("NO_COLOR") is None
 
 
 def die(message: str, exit_code: int = 1) -> None:
-    print(f"❌ {message}", file=sys.stderr)
-    raise SystemExit(exit_code)
+    raise CollectionError(message, exit_code)
 
 
 def set_colour_mode(mode: str | None) -> None:
@@ -833,9 +833,98 @@ def session_date_from_path(path: Path) -> str | None:
     return None
 
 
+_SESSION_CACHE: dict[str, tuple[tuple[int, int, int], dict[str, Any]]] = {}
+_SESSION_CACHE_LOCK = threading.Lock()
+
+
+def scan_session_file(file_path: Path) -> dict[str, Any]:
+    """Parse one transcript; unchanged files reuse only usage metadata."""
+    lines_seen = parse_errors = 0
+    read_failed = False
+    final_usage: dict[str, int] | None = None
+    model: str | None = None
+    provider: str | None = None
+    context_window: int | None = None
+    project: str | None = None
+
+    try:
+        with file_path.open("r", encoding="utf-8", errors="replace") as handle:
+            for line in handle:
+                lines_seen += 1
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    parse_errors += 1
+                    continue
+                if not isinstance(obj, dict):
+                    continue
+                payload = (
+                    obj.get("payload")
+                    if isinstance(obj.get("payload"), dict)
+                    else obj
+                )
+                if not isinstance(payload, dict):
+                    continue
+
+                if isinstance(payload.get("model"), str):
+                    model = payload["model"]
+                if isinstance(payload.get("model_provider"), str):
+                    provider = payload["model_provider"]
+                if isinstance(payload.get("cwd"), str):
+                    project = payload["cwd"]
+
+                info = payload.get("info")
+                if isinstance(info, dict):
+                    total_usage = info.get("total_token_usage")
+                    if isinstance(total_usage, dict):
+                        parsed_usage = {
+                            key: int(total_usage.get(key) or 0)
+                            for key in USAGE_FIELDS
+                            if isinstance(total_usage.get(key), (int, float))
+                            and not isinstance(total_usage.get(key), bool)
+                            and math.isfinite(total_usage[key])
+                            and total_usage[key] >= 0
+                        }
+                        if parsed_usage:
+                            final_usage = parsed_usage
+                    if isinstance(info.get("model_context_window"), int):
+                        context_window = int(info["model_context_window"])
+    except OSError:
+        parse_errors += 1
+        read_failed = True
+
+
+    return dict(final_usage=final_usage, model=model, provider=provider,
+                context_window=context_window, project=project, lines_seen=lines_seen,
+                parse_errors=parse_errors, read_failed=read_failed)
+
+
+def cached_session_file(file_path: Path) -> dict[str, Any]:
+    with _SESSION_CACHE_LOCK:
+        try:
+            stat = file_path.stat()
+            signature = (stat.st_mtime_ns, stat.st_size, stat.st_ino)
+        except OSError:
+            return scan_session_file(file_path)
+        key = str(file_path)
+        cached = _SESSION_CACHE.get(key)
+        if cached and cached[0] == signature:
+            return cached[1]
+        result = scan_session_file(file_path)
+        if not result["read_failed"]:
+            _SESSION_CACHE[key] = signature, result
+        return result
+
+
 def scan_sessions_metadata(codex_home: Path, top_n: int = 10) -> dict[str, Any]:
-    session_dir = codex_home / "sessions"
+    session_dir = codex_home.resolve() / "sessions"
+    codex_home = codex_home.resolve()
     files = sorted(session_dir.rglob("*.jsonl")) if session_dir.exists() else []
+    live = {str(path) for path in files}
+    with _SESSION_CACHE_LOCK:
+        for key in list(_SESSION_CACHE):
+            if Path(key).is_relative_to(session_dir) and key not in live:
+                del _SESSION_CACHE[key]
     daily_sessions: Counter[str] = Counter()
     daily_usage: dict[str, Counter[str]] = defaultdict(Counter)
     model_sessions: Counter[str] = Counter()
@@ -859,52 +948,14 @@ def scan_sessions_metadata(codex_home: Path, top_n: int = 10) -> dict[str, Any]:
         except OSError:
             pass
 
-        final_usage: dict[str, int] | None = None
-        model: str | None = None
-        provider: str | None = None
-        context_window: int | None = None
-        project: str | None = None
-
-        try:
-            with file_path.open("r", encoding="utf-8", errors="replace") as handle:
-                for line in handle:
-                    lines_seen += 1
-                    try:
-                        obj = json.loads(line)
-                    except json.JSONDecodeError:
-                        parse_errors += 1
-                        continue
-                    if not isinstance(obj, dict):
-                        continue
-                    payload = (
-                        obj.get("payload")
-                        if isinstance(obj.get("payload"), dict)
-                        else obj
-                    )
-                    if not isinstance(payload, dict):
-                        continue
-
-                    if isinstance(payload.get("model"), str):
-                        model = payload["model"]
-                    if isinstance(payload.get("model_provider"), str):
-                        provider = payload["model_provider"]
-                    if isinstance(payload.get("cwd"), str):
-                        project = payload["cwd"]
-
-                    info = payload.get("info")
-                    if isinstance(info, dict):
-                        total_usage = info.get("total_token_usage")
-                        if isinstance(total_usage, dict):
-                            final_usage = {
-                                key: int(total_usage.get(key) or 0)
-                                for key in USAGE_FIELDS
-                                if isinstance(total_usage.get(key), (int, float))
-                            }
-                        if isinstance(info.get("model_context_window"), int):
-                            context_window = int(info["model_context_window"])
-        except OSError:
-            parse_errors += 1
+        scanned = cached_session_file(file_path)
+        lines_seen += scanned["lines_seen"]
+        parse_errors += scanned["parse_errors"]
+        if scanned["read_failed"]:
             continue
+        final_usage = scanned["final_usage"]
+        model, provider = scanned["model"], scanned["provider"]
+        context_window, project = scanned["context_window"], scanned["project"]
 
         if model:
             model_sessions[model] += 1
@@ -1970,8 +2021,6 @@ def quick_summary_lines(summary: dict[str, Any]) -> list[str]:
     return lines or ["Quick summary unavailable; choose a report for details."]
 
 
-def print_quick_summary(summary: dict[str, Any], width: int | None = None) -> None:
-    menu_box("Quick Summary", quick_summary_lines(summary), width=width)
 
 
 def print_online_usage(data: dict[str, Any], top: int = 30) -> None:
@@ -2606,12 +2655,14 @@ def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
         writer.writerows(rows)
 
 
-def export_path(report: str, fmt: str) -> Path:
+def export_path(report: str, fmt: str, directory: Path | None = None) -> Path:
+    directory = (directory or EXPORT_DIR).expanduser()
+    directory.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().astimezone().strftime("%Y-%m-%d_%H%M%S_%f")
-    path = EXPORT_DIR / f"codex_{report}_report_{timestamp}.{fmt}"
+    path = directory / f"codex_{report}_report_{timestamp}.{fmt}"
     counter = 1
     while path.exists():
-        path = EXPORT_DIR / f"codex_{report}_report_{timestamp}_{counter}.{fmt}"
+        path = directory / f"codex_{report}_report_{timestamp}_{counter}.{fmt}"
         counter += 1
     return path
 
@@ -2626,8 +2677,9 @@ def export_report(
     limit: int | None = None,
     group_by: list[str] | None = None,
     no_costs: bool = False,
+    output_dir: Path | None = None,
 ) -> Path:
-    path = export_path(report, fmt)
+    path = export_path(report, fmt, output_dir)
     if fmt == "json":
         data = export_json(report, top, days, bucket_width, limit, group_by, no_costs)
         with path.open("x", encoding="utf-8") as handle:
@@ -2675,6 +2727,7 @@ def cmd_export(args: argparse.Namespace) -> None:
         args.limit,
         args.group_by,
         args.no_costs,
+        output_dir=getattr(args, "output_dir", None),
     )
     print(f"Exported {args.report} report to: {path}")
 
@@ -3180,6 +3233,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Warn when reset credits expire within this many days. Use 0 to disable soon-expiry warnings. Default: 7.",
     )
     add_api_usage_options(export, include_json=False, include_top_days=False)
+    export.add_argument("--output-dir", type=Path, help="Export directory (default: ~/Downloads/codex-usage; CODEX_USAGE_EXPORT_DIR overrides it).")
     export.set_defaults(func=cmd_export)
 
     return parser
@@ -3193,7 +3247,11 @@ def main(argv: list[str] | None = None) -> None:
             "menu" if sys.stdin.isatty() and sys.stdout.isatty() else "all"
         )
         args = parser.parse_args([default_command] + (argv or []))
-    args.func(args)
+    try:
+        args.func(args)
+    except CollectionError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        raise SystemExit(exc.exit_code) from None
 
 
 if __name__ == "__main__":

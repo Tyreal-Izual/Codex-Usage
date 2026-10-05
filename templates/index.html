@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Codex &amp; Claude Code Usage Dashboard</title>
+  <style>
+__CSS__
+</style>
+</head>
+<body>
+  <main class="shell">
+    <header>
+      <div>
+        <h1 data-i18n="appTitle">Codex &amp; Claude Code Usage Dashboard</h1>
+        <p class="subtitle" data-i18n="subtitle">A local-only view of Codex and Claude Code rate limits and token usage.</p>
+      </div>
+      <div class="status" aria-live="polite">
+        <strong id="status-title" data-i18n="statusStarting">Starting</strong>
+        <span id="status-detail" data-i18n="statusWaiting">Waiting for the first refresh.</span>
+      </div>
+    </header>
+
+    <div class="toolbar">
+      <label class="toolbar-field">
+        <span data-i18n="report">Report</span>
+        <select id="report">
+          <option value="all" data-i18n="reportAll">Overview: Codex + Claude Code</option>
+          <option value="codex-usage" data-i18n="reportCodex">Codex Usage</option>
+          <option value="claude-usage" data-i18n="reportClaude">Claude Code Usage</option>
+          <option value="isambard-status" data-i18n="reportIsambard">Isambard Service Status</option>
+        </select>
+      </label>
+      <label class="toolbar-field">
+        <span data-i18n="language">Language</span>
+        <select id="language">
+          <option value="en">English</option>
+          <option value="zh">中文 Chinese</option>
+        </select>
+      </label>
+      <label class="toggle">
+        <input id="isambard-enabled" type="checkbox" checked>
+        <span>Isambard Status</span>
+      </label>
+      <label class="toggle">
+        <input id="radar-enabled" type="checkbox" checked>
+        <span>Codex Radar</span>
+      </label>
+      <label class="toggle">
+        <input id="auto" type="checkbox" checked>
+        <span data-i18n="autoRefresh">Auto Refresh</span>
+      </label>
+      <button id="refresh-now" type="button" data-i18n="refresh">Refresh</button>
+    </div>
+
+    <div id="notice" class="notice"></div>
+    <div id="sections" class="sections"></div>
+  </main>
+
+  <button id="return-to-limits" class="return-to-limits" type="button" hidden>
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M6 5h12M6 15l6-6 6 6M12 9v11"/>
+    </svg>
+    <span data-i18n="backToLimits">Back to limits</span>
+  </button>
+
+  <script>
+__JS__
+</script>
+</body>
+</html>

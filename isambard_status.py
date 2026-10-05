@@ -5,9 +5,6 @@ from __future__ import annotations
 
 import html
 import json
-import os
-import ssl
-import tempfile
 from datetime import datetime, timezone
 from html.parser import HTMLParser
 from pathlib import Path
@@ -15,10 +12,13 @@ from typing import Any
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 
+from usage_common import atomic_write_json, cache_directory, ssl_context
+
 
 STATUS_URL = "https://docs.isambard.ac.uk/service-status/"
 MAINTENANCE_URL = "https://docs.isambard.ac.uk/service-status/planned_maintenance/"
-DEFAULT_CACHE_PATH = Path(__file__).with_name("isambard_status_snapshot.json")
+DEFAULT_CACHE_PATH = cache_directory() / "isambard_status_snapshot.json"
+LEGACY_CACHE_PATH = Path(__file__).resolve().with_name("isambard_status_snapshot.json")
 DEFAULT_CACHE_SECONDS = 300
 USER_AGENT = "Codex-Usage-Isambard-Status/1.0 (local personal dashboard)"
 # Depth tracking assumes MkDocs/python-markdown closes every non-void tag;
@@ -175,22 +175,6 @@ class PageParser(HTMLParser):
             self._status[target].append(data)
 
 
-def ssl_context() -> ssl.SSLContext:
-    """Use a system CA bundle when Python has no configured certificate path."""
-    configured_bundle = os.environ.get("SSL_CERT_FILE")
-    if configured_bundle:
-        return ssl.create_default_context(cafile=configured_bundle)
-
-    for bundle in (
-        "/etc/ssl/cert.pem",  # macOS and some Unix installations
-        "/etc/ssl/certs/ca-certificates.crt",  # Debian/Ubuntu
-        "/etc/pki/tls/certs/ca-bundle.crt",  # RHEL/Fedora
-    ):
-        if Path(bundle).is_file():
-            return ssl.create_default_context(cafile=bundle)
-    return ssl.create_default_context()
-
-
 def fetch(url: str, timeout: int) -> str:
     request = Request(url, headers={"User-Agent": USER_AGENT, "Accept": "text/html"})
     with urlopen(request, timeout=timeout, context=ssl_context()) as response:
@@ -213,32 +197,19 @@ def parse_pages(status_html: str, maintenance_html: str) -> dict[str, Any]:
     }
 
 
-def status_kind(status: dict[str, str]) -> str:
-    """Map the source's MkDocs admonition class to a stable display state."""
-    source_class = status.get("class", "").lower()
-    title = status.get("title", "").lower()
-    if "success" in source_class or "no known issue" in title:
-        return "ok"
-    if "warning" in source_class or "degraded" in title or "at risk" in title:
-        return "warning"
-    if "failure" in source_class or "outage" in title:
-        return "outage"
-    return "unknown"
-
-
 def load_cache(cache_path: Path = DEFAULT_CACHE_PATH) -> dict[str, Any] | None:
     try:
-        data = json.loads(cache_path.read_text(encoding="utf-8"))
+        read_path = cache_path
+        if read_path == DEFAULT_CACHE_PATH and not read_path.exists():
+            read_path = LEGACY_CACHE_PATH
+        data = json.loads(read_path.read_text(encoding="utf-8"))
     except (FileNotFoundError, json.JSONDecodeError, OSError):
         return None
     return data if isinstance(data, dict) else None
 
 
 def atomic_write(path: Path, content: str) -> None:
-    with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as temp:
-        temp.write(content)
-        temporary_path = Path(temp.name)
-    temporary_path.replace(path)
+    atomic_write_json(path, json.loads(content))
 
 
 def cache_age_seconds(data: dict[str, Any]) -> int | None:
@@ -286,7 +257,6 @@ def collect_status(
             fetch(STATUS_URL, timeout),
             fetch(MAINTENANCE_URL, timeout),
         )
-        atomic_write(cache_path, json.dumps(data, ensure_ascii=False, indent=2) + "\n")
     except (URLError, TimeoutError, OSError, ValueError) as error:
         if cached:
             return cached_result(
@@ -300,10 +270,15 @@ def collect_status(
             "error": {"message": f"Isambard status fetch failed: {error}"},
         }
 
-    return {
+    result = {
         "ok": True,
         "retrieved_at": datetime.now(timezone.utc).isoformat(),
         "status": data,
         "source": "live",
         "cache_age_seconds": 0,
     }
+    try:
+        atomic_write(cache_path, json.dumps(data, ensure_ascii=False) + "\n")
+    except OSError as error:
+        result["warning"] = f"Live status is available, but the cache could not be saved: {error}"
+    return result

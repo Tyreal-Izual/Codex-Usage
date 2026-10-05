@@ -1,242 +1,135 @@
-# Codex & Claude Code Local Web Dashboard
+# Dashboard configuration and API / 仪表盘配置与 API
 
-本文说明当前网页的操作、页面结构和本地接口。完整安装、配置、数据口径和测试
-命令见 [中文 README](README.zh-CN.md)；原 Codex CLI 用法见
-[保留的 CLI 文档](README_OLD.md)。
+[English quick start](README.md) · [中文快速开始](README.zh-CN.md)
 
-网页入口为 `codex_claude_usage_web.py`，Codex、Claude Code、Isambard 和 Radar
-采集分别保留在独立模块中。服务默认监听 `127.0.0.1`，只使用 Python 标准库。
-
-## 运行方法
-
-在仓库目录里运行：
+## Startup options / 启动参数
 
 ```sh
-python3 codex_claude_usage_web.py
+python3 codex_claude_usage_web.py --help
+python3 codex_claude_usage_web.py --sources all --refresh 30 --quiet
+python3 codex_claude_usage_web.py --sources claude --default-report claude-usage
+python3 codex_claude_usage_web.py --cache-dir /tmp/codex-usage-cache --check
 ```
 
-然后打开终端打印的私有访问链接。第一次访问会设置 `HttpOnly`、`SameSite=Strict` 的
-会话 Cookie，并重定向到 `http://127.0.0.1:8765`，从地址栏移除访问令牌。不要分享
-终端打印的链接；服务每次重启都会生成新令牌。
-
-终端里按 `Ctrl-C` 可以停止服务。
-
-如果看到 `OSError: [Errno 48] Address already in use`，说明这个端口已经被占用。
-最简单的处理方式是换一个端口：
-
-```sh
-python3 codex_claude_usage_web.py --port 8766
-```
-
-然后打开终端打印的、使用新端口的私有访问链接。
-
-## 常用参数
-
-换端口：
-
-```sh
-python3 codex_claude_usage_web.py --port 8766
-```
-
-调整浏览器默认刷新间隔，单位是秒：
-
-```sh
-python3 codex_claude_usage_web.py --refresh 30
-```
-
-隐藏每次请求的访问日志：
-
-```sh
-python3 codex_claude_usage_web.py --quiet
-```
-
-修改监听地址：
-
-```sh
-python3 codex_claude_usage_web.py --host 127.0.0.1
-```
-
-默认 host 是 `127.0.0.1`。服务会校验 Host，`/api/usage` 需要会话 Cookie 或
-`Authorization: Bearer <终端打印的令牌>`，并限制同时处理的请求与数据采集数量。
-通配监听需要显式指定允许的主机名，例如：
-
-```sh
-python3 codex_claude_usage_web.py --host 0.0.0.0 --allowed-host 192.0.2.10
-```
-
-这可能让局域网内其他设备访问到账户和用量信息，请谨慎使用。
-
-## 页面控件
-
-页面顶部提供这些控件：
-
-| 控件 | 作用 |
+| Option | Meaning / 作用 |
 | --- | --- |
-| `Report` | 选择总览、Codex 用量、Claude Code 用量，或 `Isambard 服务状态`；Codex 用量包含重置额度、本地/在线用量和可选的 Admin API 用量/成本 |
-| `Language` | 在 English 和 中文 Chinese 之间切换 |
-| `Local Days` | 控制本地每日用量热力图和每日数据窗口 |
-| `Refresh Seconds` | 控制自动刷新间隔 |
-| `Auto Refresh` | 开启或关闭自动刷新 |
-| `Refresh` | 立即手动刷新一次 |
-| `返回在线限额` | 右下角悬浮按钮；当前页面有 Codex 在线限额卡片时显示，点击即可回到卡片顶部 |
+| `--sources auto` | Default: detect local Codex/Claude and enable Isambard/Radar; 默认检测本地来源并勾选两项公共来源 |
+| `--sources all` | Enable Codex, Claude, Isambard and Radar; 恢复完整总览 |
+| `--sources codex,radar` | Enable only the listed sources; 只启用列出的来源 |
+| `--default-report` | `all`, `codex-usage`, `claude-usage`, `isambard-status` |
+| `--check` | Read-only JSON setup diagnostics, then exit; 只读配置检查 |
+| `--cache-dir` | Public-source disk cache directory; 公共来源缓存目录 |
+| `--port 8766` | Change the default port 8765; 修改端口 |
+| `--refresh 30` | Browser interval (default 15 seconds), local configuration only; 仅本地配置 |
+| `--days 60` | Local daily rows (default 30, maximum 365), local configuration only; 仅本地配置 |
+| `--quiet` | Disable per-request access logs; 关闭访问日志 |
+| `--max-workers` | Simultaneous HTTP requests, default 4 |
+| `--max-collectors` | Simultaneous report collections, default 2 |
+| `--cache-seconds` | Whole-report reuse window, default 5 seconds; per-source caches remain independent |
 
-首次打开总览或 Codex 用量页会自动定位到在线限额卡片；后续刷新保留阅读位置。
-限额、余额、重置次数与两个 Models 面板中的数值变化时，会轻微弹动一次并高亮四秒。
-首次加载、语言/报告切换、age 和倒计时不触发；模型排行换位也不会误闪。
-“减少动态效果”启用时仅保留高亮。
+The page URL can override the default view with `?report=claude-usage` after
+sign-in. Disabled sources return `disabled: true` and never run collectors.
+An optional Admin API section appears only when `OPENAI_ADMIN_KEY` is configured
+and Codex is enabled. Browser language is saved locally.
 
-## Isambard 服务状态与计划维护
+首次认证后可用 `?report=claude-usage` 指定视图。关闭的来源不会执行采集。
+默认自动检测的结果在重启服务时更新；安装或登录新客户端后请重启。
 
-总览依次显示 `Codex Online Rate Limits`、`Claude Code Rate Limits` 和
-`Isambard Service Status`，然后展示两个 Models 面板、重置额度及 Radar 曲线。
-Isambard 面板标题行会显示缓存时长（如适用）和可点击的 **计划维护** 入口，不再显示抓取
-时间或数据来源；入口会打开：
+Toolbar: Report (Overview by default), Language, Isambard Status, Codex Radar, Auto Refresh and Refresh.
+The two public sources are checked by default. Switching one off hides its panel and stops new
+collection work; Radar's background worker pauses. An already-running fetch may finish.
+The switches are shared by this server's tabs, synchronized on refresh, and reset to the startup
+selection when the server restarts. Explicit `--sources` selections determine initial checkboxes.
 
-```text
-http://127.0.0.1:8765/isambard-maintenance
-```
+工具栏保留 Report／语言／自动刷新／刷新，并加入默认勾选的 Isambard Status 和 Codex Radar。
+Local Days 与 Refresh Seconds 仅通过本地启动参数调整。关闭来源不会删除缓存。
 
-该二级页展示完整维护表，提供返回 dashboard 的链接和 **刷新源数据** 按钮。它与主页面
-使用同一份 Isambard 缓存：普通自动刷新最多复用五分钟结果，主页面的 **刷新** 和二级页的
-**刷新源数据** 会跳过缓存并立即抓取。抓取失败时，若存在上次成功数据，页面会保留该数据
-并显示失败提示。
+## Refresh behavior / 刷新行为
 
-## 页面结构
+The browser requests at most two sections concurrently and displays each result
+as it arrives. An unavailable source leaves the other sections usable. Existing
+results remain visible during refresh. Switching the report or source selection never
+renders a late response for the old selection.
 
-总览与 Codex 用量页的 Banked Resets 下方新增 Codex Radar 综合智能曲线。
-独立模块 `codex_radar.py` 同时封装数据采集、加权计算、后台缓存和前端组件，
-主页面只调用组件；`GET /api/codex-radar` 使用现有鉴权并直接读取内存快照。
-当前支持 GPT-6 / GPT-5 分组（GPT-6 包含 GPT-6.1 Sol），以及综合、软件工程、视觉推理
-三种视图；6.1 Sol 与新 Sol/Luna
-按 30 份有效样本门槛显示成绩，并区分仅软件成绩、样本不足和独立题覆盖质量。
-后台线程每四小时更新，失败时保留旧曲线并退避重试，不阻塞其他用量采集。
-无需浏览器保持打开，但需要网页服务器运行；休眠结束后重新检查到期时间。
-完整口径、命令和缓存说明见 [README.zh-CN.md](README.zh-CN.md#codex-radar-评测曲线)。
-
-以下列出总览和各详情页提供的区域；完整 token、项目、session、每日用量和 profile
-统计位于对应详情页，总览集中显示限额、服务状态、模型摘要、重置额度和 Radar：
-
-| 区域 | 说明 |
+| Source | Reuse / 更新策略 |
 | --- | --- |
-| `Codex Online Rate Limits` | 固定显示在线 primary / weekly 两个位置；可用窗口显示剩余百分比和 reset 时间，不可用窗口以 `-` 占位，同时显示账号状态 |
-| `Claude Code Rate Limits` | statusLine 快照中的 5 小时/7 天剩余百分比、重置时间、快照年龄、CLI 登录状态和安装状态 |
-| `Claude Code Local Token Totals` | 去重后的输入、输出、缓存创建、缓存读取和总 token |
-| `Claude Code Models` / `Claude Code Projects` / `Claude Code Daily Usage` / `Claude Code Top Sessions` | Claude 本地 JSONL 的模型、项目、每日和 session 排行 |
-| `Isambard Service Status` | 公开 Isambard 服务状态；标题行显示缓存时长和计划维护入口，入口会打开二级详情页 |
-| `Codex Reset Credits` | 通过 Codex 只读在线接口获取的 reset credits 信息 |
-| `Codex Local Token Totals` | 从本地 session 文件统计出的 token 总量 |
-| `Codex Models` | 从本地 thread 数据库按模型聚合，包含堆叠条形图、颜色标识和占比 |
-| `Codex Radar` | 总览和 Codex 详情中的成本 / 耗时 / 费用 × IQ 曲线、同步年龄、四小时后台更新与缓存回退 |
-| `Codex Profile Statistics` | 在线 profile 统计信息 |
-| `Codex Daily Local Usage` | 类似 GitHub contributions 的本地每日用量热力图 |
-| `Codex Top Sessions` | 本地 token 计数最高的 session 文件 |
-| `Admin API status` | 设置 `OPENAI_ADMIN_KEY` 后展示 OpenAI Admin API 用量和成本 |
+| Codex local | 5-second source cache; unchanged JSONL files reuse parsed metadata |
+| Codex online/reset credits | 60-second source cache, shared across views |
+| Claude | 15-second source cache; unchanged JSONL files reuse parsed metadata |
+| Optional Admin API | 60-second source cache |
+| Isambard | 30-second source cache over a 5-minute disk cache |
+| Radar | Independent 4-hour worker, only started when enabled |
 
-如果某一类数据读取失败，页面会继续展示其他可用区域，并在顶部提示失败原因。
+网页同时最多加载两个区块，逐块显示结果。刷新间隔控制读取频率，各来源仍使用自己的缓存。
+手动刷新仅对 Isambard 绕过缓存，30 秒内最多启动一次；不会强制刷新 Radar 或 Claude 限额。
+`days` 控制本地每日表保留的最近有记录日期行数，模型和总 token 统计仍为全部历史。
 
-## Claude Code 后台快照刷新
+## Paths and environment / 路径与环境变量
 
-网页轮询只读取 `~/.claude/usage-dashboard.json`，不会自行启动 Claude Code。如果主要
-使用 Claude Desktop，可以在 macOS 上安装独立刷新器：
+| Variable | Purpose / 用途 |
+| --- | --- |
+| `CODEX_HOME` | Codex state directory; default `~/.codex` |
+| `CLAUDE_CONFIG_DIR` | Claude state directory; default `~/.claude` |
+| `CLAUDE_BIN` | Explicit Claude launcher for auth checks and the refresher |
+| `CLAUDE_USAGE_PROJECT_DIR` | Temporary refresher session's project |
+| `CLAUDE_USAGE_SNAPSHOT` | Claude limit snapshot; default `~/.claude/usage-dashboard.json` |
+| `CLAUDE_USAGE_STALE_SECONDS` | Snapshot stale threshold; default 900 seconds |
+| `CODEX_USAGE_CACHE_DIR` | Public caches; overridden by `--cache-dir` |
+| `CODEX_USAGE_EXPORT_DIR` | CLI export directory; overridden by `export --output-dir` |
+| `SSL_CERT_FILE` | CA bundle override for public status/benchmark requests |
+| `OPENAI_ADMIN_KEY` | Optional organization usage/cost API; not needed for subscriptions |
 
-```sh
-python3 claude_usage_refresher.py --once --force
-python3 claude_usage_refresher.py --install
-python3 claude_usage_refresher.py --status
-```
+Default public cache locations:
 
-LaunchAgent 默认每 60 秒做一次轻量本地检查，但普通完整刷新仍约每 600 秒一次；轻量
-检查不会启动 Claude。任一快照 reset 时间到达 30 秒后，脚本会绕过普通快照年龄限制，
-优先刷新一次。任何完整刷新失败或异常中断后，都会按 300、600、1200、最多 2400 秒
-指数退避，并在 `usage-dashboard-refresh-state.json` 中保存非敏感的尝试时间、reset
-时间戳、退出状态与连续失败次数，避免故障期间每分钟重复启动 Claude。
+- macOS: `~/Library/Caches/codex-usage`
+- Linux: `$XDG_CACHE_HOME/codex-usage`, or `~/.cache/codex-usage`
+- Windows: `%LOCALAPPDATA%/codex-usage`
 
-需要完整刷新时，脚本通过伪终端在当前仓库打开临时空白 Claude 会话。它只为该进程设置
-`disableRemoteControl: true` 并启用 `--ax-screen-reader`，不修改全局设置；最多等待 30 秒
-直到出现明确的输入提示，再等待 1 秒后执行本地 `/usage` 命令。保持 30 秒后，脚本只
-解析 5 小时/weekly 百分比与 reset 时间，写入 `usage-dashboard.json`，再发送 `Ctrl-D`
-退出。屏幕阅读器输出累计多轮页面更新时，解析器只取每个窗口最后一组带明确标签的
-完整值，不会把无标签的增量更新按位置归入 5 小时或 weekly 窗口。
-
-`/usage` 不向模型提交 prompt，脚本不会恢复已有会话或保存伪终端内容。脚本使用进程锁
-防止重叠，并在正常退出失败时终止残留进程。5 小时与 weekly 窗口会独立解析；单个窗口
-缺失或百分比无效不会丢弃另一个有效窗口，越界百分比也不会被钳成 100%。该刷新方式
-可以独立于 statusLine 桥接使用。
-
-卸载命令：
+Exports default to `~/Downloads/codex-usage`:
 
 ```sh
-python3 claude_usage_refresher.py --uninstall
+python3 codex_usage.py export --report local-usage --format json --output-dir ./exports
 ```
 
-这是 Claude Code 客户端自动化，不是官方后台 API。Mac 睡眠或用户退出登录期间不会
-定时刷新；Claude Code 的启动行为或 `/usage` 页面格式变化也可能影响该功能。
+Earlier repository-local public caches are read as a fallback when the new
+default cache file is absent. New writes use the user cache directory; existing
+files are not deleted. Custom cache directories do not read legacy caches.
+缓存写入失败不会丢弃已抓取的数据。旧仓库缓存仅作为默认路径的回退读取，原文件不会被删除。
 
-页面通过本地 `claude auth status` 检查 CLI 登录状态，只保留 `loggedIn`、认证方式和
-订阅类型等非身份字段，不返回邮箱或组织 ID。检查明确成功且已登录时显示绿色状态；
-明确未登录且快照已经过期或不可用时显示红色提示与 `claude auth login` 命令。检查失败
-或输出格式无法识别时不显示登录结论，以免把旧快照或检测故障误报为“已登录”。
+## Local HTTP API / 本地接口
 
-## 本地接口
+| Route | Result |
+| --- | --- |
+| `GET /`, `GET /index.html` | Authenticated dashboard |
+| `GET /isambard-maintenance` | Authenticated maintenance page |
+| `GET /healthz` | Health check; no account data or authentication required |
+| `GET /api/usage` | Usage JSON |
+| `GET /api/codex-radar` | In-memory snapshot only; never triggers a fetch |
+| `GET /api/sources` | Current enabled sources |
+| `POST /api/sources?isambard=false&radar=true` | Change public-source switches; authenticated, requires `X-Codex-Usage-Action: set-sources` |
 
-网页入口：
+Pages and data APIs require the browser session cookie, or
+`Authorization: Bearer <token from startup URL>`. Tokens change on restart.
+Host validation applies to all routes. A wildcard bind requires an explicit
+accepted hostname, for example `--host 0.0.0.0 --allowed-host 192.0.2.10`;
+this exposes the server beyond the local machine.
 
-```text
-GET /
-GET /index.html
-GET /isambard-maintenance
-```
+`/api/usage` parameters:
 
-健康检查：
+| Parameter | Values / default |
+| --- | --- |
+| `report` | `all` (default), `codex-usage`, `claude-usage`, `isambard-status`, `resets`, `local-usage`, `online-usage`, `api-usage` |
+| `top` | Default 10, maximum 100 |
+| `days` | Default 30, maximum 365 |
+| `warn_days` | Default 7 |
+| `bucket_width` | `1d` (default), `1h`, `1m` |
+| `limit` | Optional Admin bucket count; maximum 1440 |
+| `group_by` | Optional Admin grouping fields, repeated or comma-separated |
+| `no_costs` | `true`, `1`, `yes` skips Admin costs |
+| `isambard_force_refresh` | Requires authenticated POST and `X-Codex-Usage-Action: force-refresh` |
 
-```text
-GET /healthz
-```
+Combined `all` / `codex-usage` API responses remain complete snapshots for existing
+clients. Progressive rendering is a browser behavior using the individual reports.
 
-JSON 数据接口：
-
-```text
-GET /api/usage
-GET /api/codex-radar
-```
-
-两个接口均需要浏览器会话 Cookie；命令行调用可复制启动链接中的令牌，并通过
-`Authorization: Bearer <令牌>` 请求。服务重启后旧令牌立即失效。
-
-`/api/codex-radar` 只返回后台内存快照，不接受强制抓取参数。
-`/api/usage` 的 Isambard 强制刷新需要使用 POST 并发送
-`X-Codex-Usage-Action: force-refresh`，且每 30 秒最多启动一次。
-
-`/api/usage` 常用 query 参数：
-
-| 参数 | 作用 | 默认值 |
-| --- | --- | --- |
-| `report` | `all`, `codex-usage`, `claude-usage`, `isambard-status` | `all` |
-| `top` | 排行榜或表格最多返回多少行 | `10` |
-| `days` | 本地每日数据窗口 | `30` |
-| `warn_days` | reset 过期提示窗口 | `7` |
-| `bucket_width` | API usage 的桶宽，可选 `1d`, `1h`, `1m` | `1d` |
-| `limit` | API usage 返回条数限制，最高 1440 | 空 |
-| `group_by` | API usage 分组字段，可重复或用逗号分隔 | 空 |
-| `no_costs` | 是否跳过 API costs 查询，可用 `1`, `true`, `yes` | `false` |
-| `isambard_force_refresh` | 已认证 POST 是否跳过 Isambard 五分钟缓存，可用 `1`, `true`, `yes` | `false` |
-
-示例：
-
-```text
-http://127.0.0.1:8765/api/usage?report=codex-usage&top=10&days=30
-```
-
-## 数据来源
-
-- 本地用量来自当前配置的 Codex home 目录。
-- Claude Code token 来自 `CLAUDE_CONFIG_DIR`（默认 `~/.claude`）下的
-  `projects/**/*.jsonl`，仅读取 usage、model、timestamp、session 和 cwd 元数据。
-- Claude 5 小时和 7 天限额来自 `claude_usage_statusline.py` 保存的官方 statusLine
-  字段。首次运行 `python3 claude_usage_statusline.py --install` 后，需让 Claude Code
-  完成一次回复才会生成快照。
-- reset credits 和 online usage 复用原 CLI 的只读网络请求。
-- OpenAI Admin API 用量和成本需要设置 `OPENAI_ADMIN_KEY`。
-- Isambard 状态从两个公开页面读取。解析后的结果只保存在本地、且已忽略的
-  `isambard_status_snapshot.json` 缓存文件中。
-- 网页服务只负责展示和轮询，不会写入 Codex session、thread 或 profile 数据。
+See [Claude setup](docs/claude-setup.md), [中文 Claude 设置](docs/claude-setup.zh-CN.md),
+[Radar rules](docs/radar.md) and [中文 Radar 规则](docs/radar.zh-CN.md).

@@ -417,6 +417,22 @@ class ServiceTest(unittest.TestCase):
         self.assertTrue(restarted.refresh_if_due())
 
 
+class WorkerToggleTest(unittest.TestCase):
+    def test_paused_worker_never_fetches_and_resume_keeps_cache(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fetcher = unittest.mock.Mock(side_effect=RuntimeError('synthetic offline'))
+            service = radar.RadarService(Path(directory)/'cache.json', fetcher=fetcher)
+            service.set_enabled(False)
+            self.assertFalse(service.refresh_if_due(force=True))
+            fetcher.assert_not_called()
+            service.set_enabled(True)
+            service.refresh_if_due(force=True)
+            self.assertTrue(fetcher.called)
+            before = service.snapshot()
+            service.set_enabled(False)
+            self.assertEqual(service.snapshot(), before)
+
+
 class FetchTest(unittest.TestCase):
     def test_identifies_client_checks_upstream_freshness_and_bounds_response(self):
         class Response:

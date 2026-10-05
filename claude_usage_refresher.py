@@ -15,8 +15,12 @@ collectors and web server.
 
 from __future__ import annotations
 
+from usage_common import find_claude_binary
 import argparse
-import fcntl
+try:
+    import fcntl
+except ImportError:  # Optional macOS/POSIX refresher; allow --help on Windows.
+    fcntl = None
 import json
 import math
 import os
@@ -402,36 +406,10 @@ def capture_is_installed() -> bool:
 
 
 def resolve_claude_binary(explicit: Path | None = None) -> Path:
-    candidates: list[Path] = []
-    if explicit is not None:
-        candidates.append(explicit.expanduser())
-    configured = os.environ.get("CLAUDE_BIN")
-    if configured:
-        candidates.append(Path(configured).expanduser())
-    discovered = shutil.which("claude")
-    if discovered:
-        candidates.append(Path(discovered))
-    candidates.extend(
-        (
-            Path.home() / ".local" / "bin" / "claude",
-            Path("/opt/homebrew/bin/claude"),
-            Path("/usr/local/bin/claude"),
-        )
-    )
-
-    checked: set[Path] = set()
-    for candidate in candidates:
-        executable = candidate.absolute()
-        if executable in checked:
-            continue
-        checked.add(executable)
-        if executable.is_file() and os.access(executable, os.X_OK):
-            # Keep Claude's public launcher path instead of resolving its
-            # versioned symlink. The native installer may rely on argv[0].
-            return executable
-    raise FileNotFoundError(
-        "Could not find the Claude Code executable. Pass --claude-bin or set CLAUDE_BIN."
-    )
+    binary = find_claude_binary(explicit)
+    if binary is None:
+        raise FileNotFoundError("Could not find the Claude Code executable. Pass --claude-bin or set CLAUDE_BIN.")
+    return binary
 
 
 def acquire_lock(snapshot: Path) -> BinaryIO | None:
@@ -943,6 +921,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = build_parser().parse_args()
+    if fcntl is None:
+        print("The optional refresher requires macOS or POSIX.", file=sys.stderr)
+        return 2
     snapshot = args.snapshot.expanduser().resolve()
     state_path = (
         args.state.expanduser().resolve()
