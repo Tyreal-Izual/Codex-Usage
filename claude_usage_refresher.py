@@ -413,6 +413,8 @@ def resolve_claude_binary(explicit: Path | None = None) -> Path:
 
 
 def acquire_lock(snapshot: Path) -> BinaryIO | None:
+    if fcntl is None:
+        raise OSError("The optional refresher requires macOS or POSIX.")
     lock_path = snapshot.with_name(f".{snapshot.name}.refresh.lock")
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     handle = lock_path.open("a+b")
@@ -421,6 +423,9 @@ def acquire_lock(snapshot: Path) -> BinaryIO | None:
     except BlockingIOError:
         handle.close()
         return None
+    except BaseException:
+        handle.close()
+        raise
     return handle
 
 
@@ -472,6 +477,9 @@ def run_once(
     force: bool,
     quiet: bool,
 ) -> int:
+    if fcntl is None:
+        print("The optional refresher requires macOS or POSIX.", file=sys.stderr)
+        return 2
     if not project.is_dir():
         print(f"Project directory does not exist: {project}", file=sys.stderr)
         return 2
@@ -614,8 +622,10 @@ def run_once(
             print(f"Could not write refresh state {state_path}: {exc}", file=sys.stderr)
         return 1
     finally:
-        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
-        lock_handle.close()
+        try:
+            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+        finally:
+            lock_handle.close()
 
 
 def launchctl_path() -> str:

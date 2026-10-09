@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import io
 import json
 import os
 import tempfile
 import time
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 import claude_usage_refresher as refresher
 
@@ -184,7 +186,12 @@ class ResetAwareRefreshTest(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            with patch.object(refresher.subprocess, "Popen") as spawn:
+            # This checks retry scheduling, independently of POSIX file locking.
+            locking = SimpleNamespace(LOCK_EX=2, LOCK_NB=4, LOCK_UN=8, flock=Mock())
+            with (
+                patch.object(refresher, "fcntl", locking),
+                patch.object(refresher.subprocess, "Popen") as spawn,
+            ):
                 result = refresher.run_once(
                     project=root,
                     snapshot=snapshot,
@@ -203,6 +210,74 @@ class ResetAwareRefreshTest(unittest.TestCase):
 
             self.assertEqual(result, 0)
             spawn.assert_not_called()
+            self.assertEqual([call.args[1] for call in locking.flock.call_args_list], [6, 8])
+
+
+class RefresherLockTest(unittest.TestCase):
+    def call_once(self, root: Path) -> int:
+        return refresher.run_once(
+            project=root,
+            snapshot=root / "usage-dashboard.json",
+            state_path=root / "refresh-state.json",
+            claude_binary=root / "fake-claude",
+            min_age_seconds=600,
+            reset_grace_seconds=30,
+            retry_base_seconds=300,
+            ready_timeout_seconds=30,
+            startup_delay_seconds=0,
+            timeout_seconds=1,
+            exit_grace_seconds=1,
+            force=False,
+            quiet=True,
+        )
+
+    def test_unsupported_platform_returns_cleanly_without_files_or_processes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with (
+                patch.object(refresher, "fcntl", None),
+                patch.object(refresher.subprocess, "Popen") as spawn,
+                patch("sys.stderr", new_callable=io.StringIO) as stderr,
+            ):
+                self.assertEqual(self.call_once(root), 2)
+                self.assertIn("requires macOS or POSIX", stderr.getvalue())
+                with self.assertRaisesRegex(OSError, "requires macOS or POSIX"):
+                    refresher.acquire_lock(root / "nested" / "snapshot.json")
+            spawn.assert_not_called()
+            self.assertEqual(list(root.iterdir()), [])
+
+    def test_lock_contention_and_failure_both_close_handle(self):
+        with tempfile.TemporaryDirectory() as directory:
+            snapshot = Path(directory) / "snapshot.json"
+            for error in (BlockingIOError("busy"), OSError("lock failed")):
+                with self.subTest(error=type(error).__name__):
+                    handle = Mock()
+                    locking = SimpleNamespace(
+                        LOCK_EX=2, LOCK_NB=4, flock=Mock(side_effect=error)
+                    )
+                    with (
+                        patch.object(refresher, "fcntl", locking),
+                        patch.object(Path, "open", return_value=handle),
+                    ):
+                        if isinstance(error, BlockingIOError):
+                            self.assertIsNone(refresher.acquire_lock(snapshot))
+                        else:
+                            with self.assertRaisesRegex(OSError, "lock failed"):
+                                refresher.acquire_lock(snapshot)
+                    handle.close.assert_called_once()
+
+    def test_unlock_failure_still_closes_handle(self):
+        with tempfile.TemporaryDirectory() as directory:
+            handle = Mock()
+            locking = SimpleNamespace(LOCK_UN=8, flock=Mock(side_effect=OSError("unlock failed")))
+            with (
+                patch.object(refresher, "fcntl", locking),
+                patch.object(refresher, "acquire_lock", return_value=handle),
+                patch.object(refresher, "refresh_decision", return_value=None),
+            ):
+                with self.assertRaisesRegex(OSError, "unlock failed"):
+                    self.call_once(Path(directory))
+            handle.close.assert_called_once()
 
 
 class UsageScreenParserTest(unittest.TestCase):

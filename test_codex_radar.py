@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import http.client
 import json
+import os
 import shutil
 import subprocess
 import tempfile
@@ -249,7 +250,10 @@ class ServiceTest(unittest.TestCase):
         self.now += 1
         self.assertTrue(restarted.refresh_if_due())
         self.assertEqual(len(self.calls), 6)
-        self.assertEqual(self.path.stat().st_mode & 0o777, 0o600)
+        # Windows stat modes do not express POSIX owner/group permissions.
+        # Cache creation and restart behavior above are checked on every OS.
+        if os.name == "posix":
+            self.assertEqual(self.path.stat().st_mode & 0o777, 0o600)
 
     def test_failure_preserves_snapshot_and_persists_retry_backoff(self):
         self.service.refresh_if_due()
