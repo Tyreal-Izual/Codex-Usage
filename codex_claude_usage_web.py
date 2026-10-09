@@ -13,6 +13,7 @@ import http.cookies
 import json
 import math
 import secrets
+import socket
 import sys
 import threading
 import time
@@ -196,7 +197,24 @@ class BoundedThreadingHTTPServer(ThreadingHTTPServer):
                 + body
             )
             try:
+                # Closing a socket with unread request bytes can reset it on
+                # Windows, discarding the 503 before the client receives it.
+                # Half-close our response, then drain until EOF with strict
+                # time/byte limits so a slow peer cannot stall the accept loop.
+                deadline = time.monotonic() + 0.25
+                request.settimeout(0.25)
                 request.sendall(response)
+                request.shutdown(socket.SHUT_WR)
+                remaining = 64 * 1024
+                while remaining > 0:
+                    timeout = deadline - time.monotonic()
+                    if timeout <= 0:
+                        break
+                    request.settimeout(timeout)
+                    chunk = request.recv(min(4096, remaining))
+                    if not chunk:
+                        break
+                    remaining -= len(chunk)
             except OSError:
                 pass
             finally:

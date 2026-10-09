@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import http.client
 import json
+import socket
 import threading
 import unittest
 from concurrent.futures import ThreadPoolExecutor
@@ -301,6 +302,34 @@ class HostValidationTest(unittest.TestCase):
 
 
 class BoundedServerTest(unittest.TestCase):
+    def test_busy_client_that_stays_open_cannot_stall_next_request(self):
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(204)
+                self.end_headers()
+
+            def log_message(self, *args):
+                pass
+
+        server = web.BoundedThreadingHTTPServer(("127.0.0.1", 0), Handler, max_workers=1)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        server._request_slots.acquire()
+        reserved = True
+        thread.start()
+        try:
+            with socket.create_connection(server.server_address, timeout=3) as idle:
+                # Do not send headers or close after reading the rejection.
+                self.assertIn(b"503 Service Unavailable", idle.recv(4096))
+                server._request_slots.release()
+                reserved = False
+                self.assertEqual(self._get_status(server.server_port), 204)
+        finally:
+            if reserved:
+                server._request_slots.release()
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
     def test_excess_http_request_is_rejected_without_spawning_a_worker(self) -> None:
         started = threading.Event()
         release = threading.Event()
@@ -327,7 +356,8 @@ class BoundedServerTest(unittest.TestCase):
             with ThreadPoolExecutor(max_workers=1) as executor:
                 first = executor.submit(self._get_status, port)
                 self.assertTrue(started.wait(timeout=3))
-                self.assertEqual(self._get_status(port), 503)
+                for _ in range(10):
+                    self.assertEqual(self._get_status(port), 503)
                 release.set()
                 self.assertEqual(first.result(timeout=3), 204)
         finally:
@@ -339,12 +369,13 @@ class BoundedServerTest(unittest.TestCase):
     @staticmethod
     def _get_status(port: int) -> int:
         connection = http.client.HTTPConnection("127.0.0.1", port, timeout=3)
-        connection.request("GET", "/")
-        response = connection.getresponse()
-        response.read()
-        status = response.status
-        connection.close()
-        return status
+        try:
+            connection.request("GET", "/")
+            response = connection.getresponse()
+            response.read()
+            return response.status
+        finally:
+            connection.close()
 
 
 class ReportCoordinatorTest(unittest.TestCase):
