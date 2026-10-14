@@ -29,6 +29,7 @@ Keep the checkout together; copying only an entry-point script is insufficient.
 ```sh
 python3 -B -m unittest discover -v
 python3 -B -m unittest test_codex_usage test_usage_sources test_dashboard_refresh -v
+python3 -B -m unittest test_codex_radar -v
 ```
 
 Node.js on PATH enables the JavaScript regression tests. Python marks those tests
@@ -54,4 +55,8 @@ they do not establish visual correctness on every browser.
 - A source cache coalesces matching work without blocking unrelated sources.
 - Disabled sources never start new collection work (already-running fetches may finish); `--check` never launches clients.
 - Failed disk writes retain useful live results and clean up temporary files.
+- RadarBench scores are consumed without regrading; zero and missing scores remain distinct.
+- Radar refreshes validate all model selections against the same catalog before replacing the snapshot.
+- Old IQ caches are never displayed; only valid RadarBench snapshots can be used as fallback.
+- Radar charts and controls precede score cards in both languages and all chart modes.
 - Core collectors raise structured errors; only the CLI prints its error messages.

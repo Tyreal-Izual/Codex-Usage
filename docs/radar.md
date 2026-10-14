@@ -1,68 +1,69 @@
-# Codex Radar benchmark curves
+# Codex Radar benchmarks
 
 [Back to quick start](../README.md)
 
-Radar is enabled by default. Toggle the Codex Radar checkbox in the toolbar to pause/resume it. `--sources` controls the initial selection.
+Radar is enabled by default; use the toolbar checkbox to pause/resume collection.
+The collector remains in `codex_radar.py`, with editable chart assets in
+`static/radar.js` and `static/radar.css`. The panel appears below Banked Resets
+when that card is present. It also works when Radar is the only enabled source.
 
-The collector is in `codex_radar.py`; editable chart assets are in `static/radar.js` and `static/radar.css`. The default cache is in the per-user cache directory (`CODEX_USAGE_CACHE_DIR` overrides it).
+## Current benchmark: RadarBench
 
-When enabled, the Overview and Codex Usage views include a full-width **Codex Radar** panel
-immediately below Codex Reset Credits (banked resets). It shows community
-benchmark scores against combined cost, duration, or cost. It defaults to **GPT-6 (Astra, 6.1 Sol, 6 Sol, and Luna)**,
-with a GPT-5 group and separate composite, software-engineering, and visual-spatial
-views. Each view includes score cards and curves. The independent
-`codex_radar.py` module owns collection, calculation and caching; chart source lives in `static/`; the web entry point only mounts it and exposes its cached data.
-The title's Updated badge shows time since the last successful local sync;
-hover over it for the exact sync and source-data timestamps.
+The integration follows the [public Radar site](https://codexradar.com/)'s
+2026-10-13 RadarBench contract. The old composite IQ / software / visual views
+are legacy benchmarks and must not be compared with the new scores.
 
-While Radar is enabled and the dashboard server is running, a background worker checks the two public
-benchmark sources and the optional distinct-task coverage endpoint every four
-hours, even with the browser closed. The first run fetches immediately; a restart reuses a fresh disk cache. Sleep or
-offline time can delay updates. Failed refreshes retain the last successful
-snapshot and retry after 15, 30, 60, 120, then at most 240 minutes. The panel
-distinguishes source-data time from local sync time and marks stale results.
+- The verified catalog contains 64 tasks from DeepSWE, Pompeii, TB4 and Science.
+  Scores are on a 0–150 scale and are read directly from the public summary API.
+  Scoring uses each task's latest three valid grades, with equal weight among
+  covered tasks. Missing tasks are not zero; a real zero score is retained.
+- The current display includes Astra, 6.1 Sol, 6 Sol, 5.6 Sol, 6 Luna and
+  5.6 Luna: 34 configurations. Sol and Astra include **ultra**; Luna stops at
+  **max**. The old 30-sample eligibility threshold does not apply to RadarBench.
+- Cards show **Provisional**, **Complete** or **Not graded**, task coverage out
+  of 64, and the number of records used for scoring (up to three per covered task).
+- Cost means **API-equivalent USD**, not subscription deductions or cash charges.
+  Cost and duration use all evidenced valid grades for the current task set and
+  configuration; their sample window differs from the score's latest-three rule.
+  Each metric shows known/total samples. Partial means use only known samples;
+  unavailable or invalid statistics do not erase a valid score.
+- The chart and its controls appear above the score cards. The default chart shows daily score history for one model, with distinct effort
+  markers and line styles. Select another model or switch to cost/time versus
+  score. Daily history is the final score per **UTC grading day**; days without
+  grades are omitted, and the date is not an exact grading timestamp. The data
+  table includes both current scores and the selected model's history.
 
-The calculation follows Codex Radar's 2026-10-04 display rules:
+## Synchronization and cache
 
-- GPT-6.1 Sol and GPT-6 Sol/Luna need 30 valid software samples for composite IQ. Visual results
-  contribute only with 30 valid samples of their own; otherwise the score is
-  explicitly marked **Software only**. Missing scores are never treated as zero.
-- GPT-6.1 Sol supports low, medium, high, xhigh, and max (no ultra), sharing
-  the GPT-6 cost scale. Missing source scores show **Insufficient data** until
-  a later background refresh supplies eligible results.
-- Astra and GPT-5 composite scores still require both components. Individual
-  benchmark views remain available independently.
-- Sample counts and distinct-task coverage are separate. Coverage below 60% is
-  flagged; a failed coverage request is shown as unknown without blocking score
-  updates. Quality information describes the last local snapshot.
-- Source costs may be medians; composite costs are weighted by sample counts.
-  They are no longer all labelled as average prices.
-- Cost is proportional to `price * (minutes / 10) ** (log(2.5) / log(1.35))`.
-  The largest cost **within the selected generation and benchmark** is 100;
-  these indexes are not absolute cross-generation prices.
-- A valid IQ remains visible on its card when cost or duration is missing;
-  invalid coordinates are omitted from the corresponding curve.
+While enabled and the server is running, the worker reads the public binding
+and each of its 34 configurations sequentially every four hours. Requests have
+bounded timeouts and response sizes. Browser refresh only reads the authenticated
+`GET /api/codex-radar` memory cache and never starts an upstream request.
+The browser need not stay open. Sleep or offline time can delay synchronization.
 
-The horizontal axis remains logarithmic, with a marked compressed gap where
-needed. Legacy caches refresh on startup; failed upgrades retain a stale-marked
-snapshot and back off before retrying. Scores are community benchmarks, not
-account usage or official ratings.
+The title age is time since the last successful **local sync**. The latest UTC
+grading day is shown separately. The public summary does not provide exact
+individual grading timestamps.
 
-The authenticated `GET /api/codex-radar` endpoint only reads memory; it never
-starts an upstream fetch. Browser refresh controls do not override the four-hour
-schedule. Hover, tap, or keyboard-focus a point for values, or expand the data
-table. English/Chinese follows the dashboard language.
+A refresh replaces the cache only after all configurations pass validation for
+the same catalog and task digest. Failure retains the last successful snapshot
+and retries after 15, 30, 60, 120, then at most 240 minutes. Old cache versions
+trigger an immediate upgrade. Legacy IQ is never displayed, including on failure:
+without a valid RadarBench snapshot the panel shows an unavailable message.
+Only successful RadarBench snapshots are retained as fallback.
 
-The ignored `codex_radar_snapshot.json` file stores sanitized benchmark data and
-retry timing, with no credentials. A standalone cache update is also available:
+The default cache is `codex_radar_snapshot.json` in the per-user cache directory
+(`CODEX_USAGE_CACHE_DIR` overrides it). It contains public benchmark metadata,
+no account credentials. The source checkbox pauses subsequent requests; an
+already-running request may finish before the worker observes the change.
 
 ```sh
-python3 codex_radar.py                 # update only when due, then print JSON
-python3 codex_radar.py --force         # explicitly refresh the disk cache now
+python3 codex_radar.py                 # update if due, then print JSON
+python3 codex_radar.py --force         # refresh the disk cache now
 python3 codex_radar.py --cache /tmp/radar.json
 ```
 
-Standalone updates are loaded by the web service on its next restart; the running
-service owns its in-memory snapshot. No LaunchAgent or Codex scheduled task is
-required. Upstream website interfaces may change; incompatible responses leave
-the last valid cache intact.
+Standalone updates are loaded by the web service on its next restart. Restart a
+running dashboard after upgrading the code. No separate scheduler is required.
+An incompatible source catalog or response leaves the last valid cache intact.
+Scores are community benchmarks, not account usage or official model ratings.

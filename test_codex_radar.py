@@ -11,6 +11,7 @@ import threading
 import unittest
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 from unittest.mock import patch
 
 import codex_radar as radar
@@ -41,6 +42,106 @@ def fixtures():
         ],
     }
     return software, visual
+
+
+def bench_fixtures():
+    binding = {
+        "enabled": True, "production_read_verified": True, "interface_confirmed": True,
+        "score_version": radar.BENCH_VERSION, "score_max": 150, "total_tasks": 64,
+        "benchmark": "synthetic-bench", "catalog_version": "test-catalog", "task_set_sha256": "a" * 64,
+        "source_counts": {"deepswe": 15, "pompeii": 16, "tb4": 14, "science": 19},
+        "model_efforts": [{"model": m, "effort": e} for m, efforts in radar.BENCH_EFFORTS.items() for e in efforts],
+    }
+    summaries = []
+    for selection in binding["model_efforts"]:
+        grade = {"score": 105, "coverage": 50, "required_tasks": 64, "score_status": "provisional"}
+        summaries.append({**{k: binding[k] for k in ("benchmark", "catalog_version", "task_set_sha256", "score_version", "score_max", "source_counts")},
+            "schema": "radar-bench-public-summary-v5-150-daily-graded-count",
+            "scoring_policy_version": "radar-bench-v2-last3-per-task-equal-weight-150",
+            **selection, **grade, "graded_runs_count": 100,
+            "statistics_state": "available", "statistics": {"sample_count": 100,
+                "cost_basis": "official_standard_api_equivalent; no estimates or claimed cash charges",
+                "metrics": {key: {"known_samples": 100, "missing_samples": 0, "known_total": total,
+                    "total": total, "mean": total / 100, "missing_reason": None}
+                    for key, total in (("api_equivalent_usd", 50), ("elapsed_ms", 60000000))}},
+            "history_state": "available", "history": {"schema": "radar-bench-public-history-v1-150-daily",
+                "score_version": radar.BENCH_VERSION, "score_max": 150, **selection, "time_zone": "UTC", "bucket": "day",
+                "updated_bucket": "2026-10-13T00:00:00Z", "points": [{"at": "2026-10-13T00:00:00Z", **grade}]}})
+    return binding, summaries
+
+
+class RadarBenchTest(unittest.TestCase):
+    def test_public_scores_are_not_recomputed_and_ultra_is_present(self):
+        binding, summaries = bench_fixtures()
+        snapshot = radar.bench_snapshot(binding, summaries)
+        self.assertTrue(radar.validate_snapshot(snapshot))
+        self.assertEqual(len(snapshot['points']), 34)
+        point = next(p for p in snapshot['points'] if (p['model'], p['effort']) == ('gpt-6.1-sol', 'ultra'))
+        self.assertEqual(point['iq'], 105)
+        self.assertEqual(point['average_minutes'], 10)
+        self.assertEqual(point['average_price_usd'], .5)
+        self.assertEqual(snapshot['source_updated_at'], '2026-10-13T00:00:00+00:00')
+
+    def test_zero_score_and_missing_score_are_distinct_without_legacy_threshold(self):
+        binding, summaries = bench_fixtures()
+        for coverage, score in ((1, 0), (0, None)):
+            with self.subTest(coverage=coverage):
+                value = copy.deepcopy(summaries[0])
+                value.update(coverage=coverage, score=score, graded_runs_count=coverage,
+                             score_status='provisional' if coverage else 'missing_current_result')
+                value.update(history=None, history_state='not_provided')
+                point = radar.bench_point(value, binding, binding['model_efforts'][0])
+                self.assertEqual(point['iq'], score)
+                self.assertEqual(point['coverage'], coverage)
+
+    def test_partial_statistics_use_known_samples_and_preserve_missing_values(self):
+        binding, summaries = bench_fixtures()
+        value = summaries[0]
+        price = value['statistics']['metrics']['api_equivalent_usd']
+        price.update(known_samples=20, missing_samples=80, known_total=10, total=None,
+                     mean=None, missing_reason='source_evidence_incomplete')
+        duration = value['statistics']['metrics']['elapsed_ms']
+        duration.update(known_samples=0, missing_samples=100, known_total=None, total=None,
+                        mean=None, missing_reason='source_evidence_incomplete')
+        point = radar.bench_point(value, binding, binding['model_efforts'][0])
+        self.assertEqual(point['average_price_usd'], .5)
+        self.assertEqual(point['price_samples'], 20)
+        self.assertEqual(point['statistics_samples'], 100)
+        self.assertIsNone(point['average_minutes'])
+
+    def test_nonfinite_optional_statistics_cannot_break_cache_writes(self):
+        binding, summaries = bench_fixtures()
+        summaries[0]['statistics']['metrics']['api_equivalent_usd']['known_total'] = float('nan')
+        snapshot = radar.bench_snapshot(binding, summaries)
+        self.assertTrue(radar.validate_snapshot(snapshot))
+        self.assertEqual(snapshot['points'][0]['iq'], 105)
+        self.assertIsNone(snapshot['points'][0]['average_price_usd'])
+        json.dumps(snapshot, allow_nan=False)
+        snapshot['summaries'][0]['extra'] = float('nan')
+        self.assertFalse(radar.validate_snapshot(snapshot))
+
+    def test_wrong_catalog_selection_score_and_history_fail_closed(self):
+        binding, summaries = bench_fixtures()
+        cases = [('task_set_sha256', 'b'*64), ('model', 'gpt-5.5'), ('score', 151),
+                 ('coverage', True), ('graded_runs_count', 151), ('score', float('nan'))]
+        for field, bad in cases:
+            with self.subTest(field=field, value=bad):
+                value = copy.deepcopy(summaries[0]); value[field] = bad
+                with self.assertRaises(ValueError):
+                    radar.bench_point(value, binding, binding['model_efforts'][0])
+        for corruption in ('duplicate', 'not_midnight', 'mismatch'):
+            with self.subTest(history=corruption):
+                value = copy.deepcopy(summaries[0])
+                rows = value['history']['points']
+                if corruption == 'duplicate': rows.append(copy.deepcopy(rows[0]))
+                elif corruption == 'not_midnight': rows[0]['at'] = '2026-10-13T12:00:00Z'
+                else: rows[0]['score'] = 90
+                with self.assertRaises(ValueError):
+                    radar.bench_point(value, binding, binding['model_efforts'][0])
+        snapshot = radar.bench_snapshot(binding, summaries)
+        snapshot['points'][0]['iq'] = 149
+        self.assertFalse(radar.validate_snapshot(snapshot))
+        with self.assertRaises(ValueError): radar.bench_snapshot(binding, summaries[:-1])
 
 
 class CompositeTest(unittest.TestCase):
@@ -113,7 +214,7 @@ class CompositeTest(unittest.TestCase):
         self.assertEqual(radar.combine_snapshots(software, visual)["points"][0]["iq"], 0)
 
 
-class CurrentRadarRulesTest(unittest.TestCase):
+class LegacyRadarRulesTest(unittest.TestCase):
     def payloads(self, software_samples=30, visual_samples=29):
         software, visual = fixtures()
         software["points"] = [{**software["points"][0], "model":"gpt-6-sol", "total":software_samples, "price_aggregation":"median"}]
@@ -178,7 +279,7 @@ class CurrentRadarRulesTest(unittest.TestCase):
         self.assertEqual(point["software_benchmark_tasks"],112)
 
 
-class Gpt61Test(unittest.TestCase):
+class LegacyGpt61Test(unittest.TestCase):
     def payloads(self, visual_samples=30):
         software, visual = fixtures()
         a, b = software["points"][0], visual["points"][0]
@@ -234,8 +335,11 @@ class ServiceTest(unittest.TestCase):
         self.calls.append(url)
         if self.error:
             raise self.error
-        software, visual = fixtures()
-        return software if url == radar.METRICS_URL else visual
+        binding, summaries = bench_fixtures()
+        if url == radar.BINDING_URL:
+            return binding
+        query = parse_qs(urlparse(url).query)
+        return next(p for p in summaries if p['model'] == query['model'][0] and p['effort'] == query['effort'][0])
 
     def test_reads_never_fetch_and_four_hour_expiry_survives_restart(self):
         self.assertFalse(self.service.snapshot()["available"])
@@ -246,10 +350,10 @@ class ServiceTest(unittest.TestCase):
         self.now += radar.REFRESH_SECONDS - 1
         restarted = radar.RadarService(self.path, clock=lambda: self.now, fetcher=self.fetch)
         self.assertFalse(restarted.refresh_if_due())
-        self.assertEqual(len(self.calls), 3)
+        self.assertEqual(len(self.calls), 35)
         self.now += 1
         self.assertTrue(restarted.refresh_if_due())
-        self.assertEqual(len(self.calls), 6)
+        self.assertEqual(len(self.calls), 70)
         # Windows stat modes do not express POSIX owner/group permissions.
         # Cache creation and restart behavior above are checked on every OS.
         if os.name == "posix":
@@ -275,20 +379,21 @@ class ServiceTest(unittest.TestCase):
         self.assertFalse(restarted.snapshot()["stale"])
         self.assertIsNone(restarted.snapshot()["last_error"])
 
-    def test_legacy_cache_refreshes_immediately_and_survives_network_failure(self):
+    def test_legacy_cache_is_hidden_during_upgrade_and_network_failure(self):
         self.service.refresh_if_due()
         state = json.loads(self.path.read_text())
         state["schema_version"] = 1
+        state["snapshot"] = radar.combine_snapshots(*fixtures())
         state["snapshot"].pop("views")
         self.path.write_text(json.dumps(state))
         upgraded = radar.RadarService(self.path, clock=lambda: self.now, fetcher=self.fetch)
-        self.assertTrue(upgraded.snapshot()["available"])
-        self.assertTrue(upgraded.snapshot()["stale"])
+        self.assertFalse(upgraded.snapshot()["available"])
+        self.assertIsNone(upgraded.snapshot()["data"])
         self.error = OSError("offline")
         self.assertFalse(upgraded.refresh_if_due())
-        self.assertTrue(upgraded.snapshot()["available"])
+        self.assertFalse(upgraded.snapshot()["available"])
         upgraded = radar.RadarService(self.path, clock=lambda: self.now, fetcher=self.fetch)
-        self.assertTrue(upgraded.snapshot()["available"])
+        self.assertFalse(upgraded.snapshot()["available"])
         count = len(self.calls)
         self.assertFalse(upgraded.refresh_if_due())
         self.assertEqual(len(self.calls), count)
@@ -296,21 +401,22 @@ class ServiceTest(unittest.TestCase):
         self.error = None
         self.assertTrue(upgraded.refresh_if_due())
         self.assertEqual(json.loads(self.path.read_text())["schema_version"], radar.CACHE_VERSION)
-        self.assertIn("views", upgraded.snapshot()["data"])
+        self.assertEqual(upgraded.snapshot()["data"]["benchmark_kind"], radar.BENCH_VERSION)
 
     def test_version_two_cache_refreshes_catalog_and_keeps_failure_backoff(self):
         self.service.refresh_if_due()
         state=json.loads(self.path.read_text())
         state["schema_version"]=2
+        state["snapshot"]=radar.combine_snapshots(*fixtures())
         self.path.write_text(json.dumps(state))
         service=radar.RadarService(self.path,clock=lambda:self.now,fetcher=self.fetch)
-        self.assertTrue(service.snapshot()["available"])
-        self.assertTrue(service.snapshot()["stale"])
+        self.assertFalse(service.snapshot()["available"])
+        self.assertIsNone(service.snapshot()["data"])
         self.error=OSError("offline")
         self.assertFalse(service.refresh_if_due())
         restarted=radar.RadarService(self.path,clock=lambda:self.now,fetcher=self.fetch)
         count=len(self.calls)
-        self.assertTrue(restarted.snapshot()["available"])
+        self.assertFalse(restarted.snapshot()["available"])
         self.assertFalse(restarted.refresh_if_due())
         self.assertEqual(len(self.calls),count)
         self.now+=radar.RETRY_SECONDS
@@ -319,17 +425,34 @@ class ServiceTest(unittest.TestCase):
         self.assertFalse(restarted.snapshot()["stale"])
         self.assertEqual(json.loads(self.path.read_text())["schema_version"],radar.CACHE_VERSION)
 
-    def test_optional_coverage_failure_keeps_new_scores(self):
-        self.service.refresh_if_due()
-        self.assertTrue(self.service.snapshot()["available"])
-        self.assertIsNotNone(self.service.snapshot()["data"]["coverage_warning"])
-        self.assertIsNone(self.service.snapshot()["last_error"])
+    def test_version_three_cache_upgrades_to_bench_without_mixing_scores(self):
+        self.path.write_text(json.dumps({'schema_version':3, 'snapshot':radar.combine_snapshots(*fixtures()),
+            'fetched_at_epoch':self.now, 'next_attempt_at_epoch':self.now+radar.REFRESH_SECONDS}))
+        service = radar.RadarService(self.path, clock=lambda:self.now, fetcher=self.fetch)
+        self.assertIsNone(service.snapshot()['data'])
+        self.assertTrue(service.refresh_if_due())
+        self.assertEqual(service.snapshot()['data']['benchmark_kind'], radar.BENCH_VERSION)
+        self.assertNotIn('views', service.snapshot()['data'])
+
+    def test_invalid_statistics_keep_valid_scores(self):
+        original = self.service._fetcher
+        def fetch(url):
+            value = original(url)
+            if url != radar.BINDING_URL:
+                value['statistics'] = {}
+            return value
+        self.service._fetcher = fetch
+        self.assertTrue(self.service.refresh_if_due())
+        point = self.service.snapshot()['data']['points'][0]
+        self.assertEqual(point['iq'], 105)
+        self.assertIsNone(point['average_price_usd'])
+        self.assertEqual(point['statistics_state'], 'invalid_source_statistics')
 
     def test_partial_fetch_never_replaces_good_snapshot(self):
         self.service.refresh_if_due()
         before = self.service.snapshot()["data"]
         original = self.service._fetcher
-        self.service._fetcher = lambda url: original(url) if url == radar.METRICS_URL else {"schema": 999}
+        self.service._fetcher = lambda url: original(url) if url == radar.BINDING_URL else {"schema": 999}
         self.assertFalse(self.service.refresh_if_due(force=True))
         self.assertEqual(self.service.snapshot()["data"], before)
 
@@ -371,7 +494,7 @@ class ServiceTest(unittest.TestCase):
             self.assertTrue(saved.wait(timeout=2))
             self.service.close()
         self.assertFalse(self.service._thread.is_alive())
-        self.assertEqual(len(self.calls), 3)
+        self.assertEqual(len(self.calls), 35)
 
     def test_corrupt_cache_recovers_and_disk_failure_keeps_live_data(self):
         self.path.write_text('{"broken":')
@@ -383,7 +506,7 @@ class ServiceTest(unittest.TestCase):
         self.assertIsNotNone(service.snapshot()["cache_warning"])
 
     def test_missing_measurement_fields_in_cache_do_not_break_startup(self):
-        for version in (1, 2, radar.CACHE_VERSION):
+        for version in (1, 2, 3, radar.CACHE_VERSION):
             for field in ("average_price_usd", "average_minutes", "combined_cost_index"):
                 with self.subTest(version=version, field=field):
                     snapshot = radar.combine_snapshots(*fixtures())
@@ -499,6 +622,68 @@ class RadarRendererTest(unittest.TestCase):
             [shutil.which("node")], input=radar.SCRIPT[start:end] + "\n" + script,
             text=True, capture_output=True, check=True, timeout=5,
         ).stdout
+
+    def test_bench_cards_and_daily_curves_use_new_labels_and_six_sol_efforts(self):
+        snapshot = radar.bench_snapshot(*bench_fixtures())
+        result = json.loads(self.render_script('const data='+json.dumps(snapshot)+''';
+          mode='bench'; root={clientWidth:1000}; visiblePoints=data.points;
+          process.stdout.write(JSON.stringify({cards:benchCards(data.points),history:benchHistory(data.points)}));
+        '''))
+        families = ET.fromstring('<root>'+result['cards']+'</root>')
+        sol = next(f for f in families if f.findtext('h3')=='GPT-6.1 Sol')
+        buttons = sol.findall('./div/button')
+        self.assertEqual([b.text for b in buttons], ['ultra','max','xhigh','high','medium','low'])
+        self.assertIn('Radar score', buttons[0].get('aria-label'))
+        self.assertIn('50/64', result['cards'])
+        self.assertIn('100/100', result['cards'])
+        history = ET.fromstring('<root>'+result['history']+'</root>')
+        self.assertEqual(len(history.findall('./svg/g')), 6)
+        self.assertIn('2026-10-13 UTC', result['history'])
+        self.assertNotIn('NaN', result['history'])
+        self.assertNotIn('Infinity', result['history'])
+
+    def test_complete_bench_markup_in_both_languages_and_metric_modes(self):
+        snapshot = radar.bench_snapshot(*bench_fixtures())
+        result = json.loads(self.render_script('payload={data:'+json.dumps(snapshot)+'};'+'''
+          const document={activeElement:null};
+          root={clientWidth:390,contains:()=>false,querySelector:()=>({addEventListener:()=>{}})};
+          const output=[];
+          for (const language of ['en','zh']) for (const selectedMetric of ['history','time','price']) {
+            lang=language; metric=selectedMetric; renderBench(); output.push(root.innerHTML);
+          }
+          process.stdout.write(JSON.stringify(output));
+        '''))
+        self.assertEqual(len(result), 6)
+        for html in result:
+            self.assertEqual(html.count('data-radar-card='), 34)
+            self.assertLess(html.index('class="radar-chart"'), html.index('class="radar-family"'))
+            self.assertIn('RadarBench', html)
+            self.assertNotIn('undefined', html)
+            self.assertNotIn('NaN', html)
+            self.assertNotIn('Infinity', html)
+        self.assertIn('每日雷达分趋势', result[3])
+        self.assertIn('平均 API 等价', result[5])
+
+    def test_loading_failure_and_legacy_payload_never_render_old_scores(self):
+        old = radar.combine_snapshots(*fixtures())
+        current = radar.bench_snapshot(*bench_fixtures())
+        cases = [None, {'data': None, 'last_error': 'offline'},
+                 {'data': old, 'last_error': 'upgrade pending'},
+                 {'data': current, 'stale': True, 'last_error': 'offline'}]
+        output = self.render_script('const cases='+json.dumps(cases)+';'+"""
+          const document={activeElement:null};
+          root={clientWidth:390,contains:()=>false,querySelector:()=>({addEventListener:()=>{}})};
+          process.stdout.write(JSON.stringify(cases.map(p=>{payload=p; renderBench(); return root.innerHTML;})));
+        """)
+        loading, failed, legacy, retained = json.loads(output)
+        self.assertIn('Fetching the first benchmark snapshot', loading)
+        self.assertIn('Benchmark data is temporarily unavailable', failed)
+        for html in (loading, failed, legacy):
+            self.assertNotIn('data-radar-card=', html)
+            self.assertNotIn('data-radar-mode=', html)
+        self.assertIn('Benchmark data is temporarily unavailable', legacy)
+        self.assertEqual(retained.count('data-radar-card='), 34)
+        self.assertIn('Showing the last successful snapshot', retained)
 
     def test_gpt61_frontend_group_and_placeholder_efforts_match_collector(self):
         output=self.render_script('''

@@ -5,6 +5,8 @@
 在本地查看订阅限额、token 历史、模型分布和会话统计。
 **Python 3.10+ · 无第三方依赖 · 一条命令启动。**
 Codex 与 Claude Code 可分别使用，Isambard 服务状态和 Codex Radar 评测为可选来源。
+Radar 已接入 [RadarBench 雷达分、覆盖率和每日趋势](docs/radar.zh-CN.md)，
+包含 GPT-6.1 Sol ultra，后台每四小时同步。
 
 ## 快速开始
 

@@ -35,3 +35,6 @@
     .radar-table table { min-width: 520px; }
     .radar-toolbar select:focus-visible, .radar-source:focus-visible, .radar-table summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
     @media (max-width: 600px) { .radar-toolbar { align-items: flex-start; } .radar-meta { line-height: 1.7; } }
+
+    .radar-bench-metrics { margin-top: 8px; display: grid; gap: 3px; font-size: 12px; overflow-wrap: anywhere; }
+    .radar-bench-metrics small { margin-bottom: 4px; }

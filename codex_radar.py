@@ -2,7 +2,7 @@
 """Codex Radar collector, four-hour cache worker, and standalone dashboard widget.
 
 Only public benchmark metadata is requested. No account or transcript data is
-sent. The composite calculation follows https://codexradar.com/ (2026-10-04).
+sent. The RadarBench integration follows https://codexradar.com/ (2026-10-13).
 Run this file directly to update the cache once; the web server owns the worker.
 """
 
@@ -17,6 +17,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from dashboard_assets import asset_text
@@ -26,7 +27,7 @@ SOURCE_URL = "https://codexradar.com/"
 METRICS_URL = SOURCE_URL + "api/intelligence-efficiency-metrics"
 VISUAL_URL = SOURCE_URL + "api/visual-spatial-reasoning"
 COVERAGE_URL = SOURCE_URL + "api/intelligence-efficiency-coverage"
-CACHE_VERSION = 3
+CACHE_VERSION = 4
 REFRESH_SECONDS = 4 * 60 * 60
 RETRY_SECONDS = 15 * 60
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
@@ -51,6 +52,11 @@ MODEL_GROUPS = {
 }
 MODEL_EFFORTS = {model: EFFORTS[:-1] if model in {"gpt-6.1-sol", "gpt-6-luna"} else EFFORTS
                  for model in MODEL_NAMES}
+BENCH_VERSION = "radar-bench-v2-150"
+BINDING_URL = SOURCE_URL + "data/radar-bench-binding.json"
+BENCH_URL = SOURCE_URL + "api/radar-bench-score"
+BENCH_EFFORTS = {m: EFFORTS[:-1] if "luna" in m else EFFORTS for m in
+                 ("gpt-6-astra", "gpt-6.1-sol", "gpt-6-sol", "gpt-5.6-sol", "gpt-6-luna", "gpt-5.6-luna")}
 COST_WEIGHT = math.log(2.5) / math.log(1.35)
 
 
@@ -84,7 +90,8 @@ def fetch_json(url: str) -> dict[str, Any]:
     })
     with urlopen(request, timeout=20, context=ssl_context()) as response:
         cache_status = response.headers.get("X-Codex-Cache", "")
-        if not cache_status or cache_status.startswith("STALE") or cache_status == "ERROR":
+        if ((url in (METRICS_URL, VISUAL_URL, COVERAGE_URL) and not cache_status)
+                or cache_status.startswith("STALE") or cache_status == "ERROR"):
             raise ValueError("Radar upstream is not serving a current snapshot")
         if url == COVERAGE_URL:
             age = float(response.headers.get("X-Codex-Cache-Age", "nan"))
@@ -250,8 +257,146 @@ def combine_snapshots(software: dict[str, Any], visual: dict[str, Any],
             "points": views["comprehensive"]["points"], "views": views, "samples": samples}
 
 
+def bench_binding(value: dict[str, Any]) -> dict[str, Any]:
+    """Accept only the public, verified 64-task / 150-point catalog."""
+    if (value.get("enabled") is not True or value.get("production_read_verified") is not True
+            or value.get("interface_confirmed") is not True
+            or value.get("score_version") != BENCH_VERSION or value.get("score_max") != 150
+            or value.get("total_tasks") != 64):
+        raise ValueError("Unsupported RadarBench binding")
+    for field in ("benchmark", "catalog_version", "task_set_sha256"):
+        if not isinstance(value.get(field), str) or not value[field]:
+            raise ValueError("Missing RadarBench catalog identity")
+    digest = value["task_set_sha256"]
+    if len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
+        raise ValueError("Invalid RadarBench task digest")
+    sources = value.get("source_counts")
+    if (not isinstance(sources, dict) or set(sources) != {"deepswe", "pompeii", "tb4", "science"}
+            or any(type(n) is not int or n < 0 for n in sources.values()) or sum(sources.values()) != 64):
+        raise ValueError("Invalid RadarBench source counts")
+    selections = value.get("model_efforts")
+    if not isinstance(selections, list) or not 0 < len(selections) <= 48:
+        raise ValueError("Invalid RadarBench selections")
+    expected = {(m, e) for m, efforts in BENCH_EFFORTS.items() for e in efforts}
+    keys = [(s.get("model"), s.get("effort")) for s in selections if isinstance(s, dict)]
+    if len(keys) != len(selections) or len(set(keys)) != len(keys) or set(keys) != expected:
+        raise ValueError("RadarBench model catalog changed")
+    return {k: copy.deepcopy(value[k]) for k in ("enabled", "production_read_verified", "interface_confirmed",
+        "score_version", "score_max", "total_tasks", "benchmark", "catalog_version", "task_set_sha256",
+        "source_counts", "model_efforts")}
+
+
+def bench_grade(value: dict[str, Any]) -> None:
+    covered = value.get("coverage")
+    score = finite_number(value.get("score"))
+    if type(covered) is not int or not 0 <= covered <= 64 or value.get("required_tasks") != 64:
+        raise ValueError("Invalid RadarBench coverage")
+    status = "missing_current_result" if covered == 0 else "complete" if covered == 64 else "provisional"
+    if value.get("score_status") != status or (value.get("score") is not None if covered == 0
+                                              else score is None or not 0 <= score <= 150):
+        raise ValueError("Invalid RadarBench score")
+
+
+def bench_statistics(value: dict[str, Any]) -> dict[str, Any]:
+    """Use means of evidenced samples; bad ancillary metrics never erase a score."""
+    empty = {"average_price_usd": None, "average_minutes": None, "price_samples": None,
+             "duration_samples": None, "statistics_samples": None,
+             "statistics_state": "not_provided"}
+    if value.get("statistics_state") != "available":
+        if value.get("statistics_state") == "invalid_source_statistics":
+            empty["statistics_state"] = "invalid_source_statistics"
+        return empty
+    try:
+        stats = value["statistics"]
+        total = stats["sample_count"]
+        if type(total) is not int or not 0 <= total <= 2**53 - 1 or stats["cost_basis"] != (
+                "official_standard_api_equivalent; no estimates or claimed cash charges"):
+            raise ValueError("Invalid statistics basis")
+        result = {**empty, "statistics_samples": total, "statistics_state": "available"}
+        for field, output, samples, divisor in (("api_equivalent_usd", "average_price_usd", "price_samples", 1),
+                                                ("elapsed_ms", "average_minutes", "duration_samples", 60000)):
+            metric = stats["metrics"][field]
+            known, missing = metric["known_samples"], metric["missing_samples"]
+            amount = finite_number(metric["known_total"])
+            if (type(known) is not int or type(missing) is not int or min(known, missing) < 0
+                    or known + missing != total or (known > 0 and (amount is None or amount < 0))
+                    or (known == 0 and metric["known_total"] is not None)):
+                raise ValueError("Invalid evidence counts")
+            if total > 0 and missing == 0:
+                mean = finite_number(metric["mean"])
+                if metric["total"] != amount or mean is None or mean < 0 or metric["missing_reason"] is not None:
+                    raise ValueError("Invalid complete statistics")
+            elif (metric["total"] is not None or metric["mean"] is not None
+                  or metric["missing_reason"] != ("no_samples" if total == 0 else "source_evidence_incomplete")):
+                raise ValueError("Invalid partial statistics")
+            result[output] = amount / known / divisor if known else None
+            result[samples] = known
+        return result
+    except (KeyError, TypeError, ValueError):
+        return {**empty, "statistics_state": "invalid_source_statistics"}
+
+
+def bench_point(value: dict[str, Any], binding: dict[str, Any], selection: dict[str, str]) -> dict[str, Any]:
+    if (value.get("schema") != "radar-bench-public-summary-v5-150-daily-graded-count"
+            or value.get("scoring_policy_version") != "radar-bench-v2-last3-per-task-equal-weight-150"
+            or any(value.get(k) != binding[k] for k in ("benchmark", "catalog_version", "task_set_sha256",
+                                                       "score_version", "score_max", "source_counts"))
+            or any(value.get(k) != selection[k] for k in ("model", "effort"))):
+        raise ValueError("RadarBench summary differs from requested catalog or selection")
+    bench_grade(value)
+    runs = value.get("graded_runs_count")
+    if runs is not None and (type(runs) is not int or not value["coverage"] <= runs <= value["coverage"] * 3):
+        raise ValueError("Invalid RadarBench grading count")
+    history = []
+    if value.get("history_state") == "available":
+        source = value.get("history")
+        if (not isinstance(source, dict) or source.get("schema") != "radar-bench-public-history-v1-150-daily"
+                or source.get("score_version") != BENCH_VERSION or source.get("score_max") != 150
+                or source.get("time_zone") != "UTC" or source.get("bucket") != "day"
+                or any(source.get(k) != selection[k] for k in ("model", "effort"))
+                or not isinstance(source.get("points"), list) or len(source["points"]) > 10000):
+            raise ValueError("Invalid RadarBench daily history")
+        previous = None
+        for row in source["points"]:
+            bench_grade(row)
+            at = source_time(row.get("at"))
+            if (at.hour or at.minute or at.second or at.microsecond or row["coverage"] == 0
+                    or (previous is not None and at <= previous)):
+                raise ValueError("Invalid RadarBench daily bucket")
+            history.append({"at": at.isoformat(), **{k: row[k] for k in ("score", "coverage", "required_tasks", "score_status")}})
+            previous = at
+        if (history and any(history[-1][k] != value[k] for k in ("score", "coverage", "score_status"))
+                or not history and value["coverage"] != 0
+                or source.get("updated_bucket") is not None and (
+                    not history or source_time(source["updated_bucket"]) != previous)):
+            raise ValueError("RadarBench history does not match current score")
+    elif value.get("history_state") != "not_provided" or value.get("history") is not None:
+        raise ValueError("Unknown RadarBench history state")
+    return {**selection, "iq": value["score"], "coverage": value["coverage"], "benchmark_tasks": 64,
+            "score_status": value["score_status"], "graded_runs_count": runs,
+            "history": history, **bench_statistics(value)}
+
+
+def bench_snapshot(binding: dict[str, Any], summaries: list[dict[str, Any]]) -> dict[str, Any]:
+    binding = bench_binding(binding)
+    if len(summaries) != len(binding["model_efforts"]):
+        raise ValueError("Incomplete RadarBench refresh")
+    summaries = copy.deepcopy(summaries)
+    points = [bench_point(value, binding, selection) for value, selection in zip(summaries, binding["model_efforts"])]
+    for summary, point in zip(summaries, points):
+        if point["statistics_state"] == "invalid_source_statistics":
+            summary.update(statistics=None, statistics_state="invalid_source_statistics")
+    dates = [row["at"] for p in points for row in p["history"]]
+    return {"benchmark_kind": BENCH_VERSION, "binding": binding, "summaries": summaries,
+            "source_updated_at": max(dates) if dates else None, "source_url": SOURCE_URL,
+            "points": points}
+
+
 def validate_snapshot(snapshot: Any, *, legacy: bool = False) -> bool:
     try:
+        if snapshot.get("benchmark_kind") == BENCH_VERSION:
+            json.dumps(snapshot, allow_nan=False)
+            return snapshot == bench_snapshot(snapshot["binding"], snapshot["summaries"])
         source_time(snapshot["source_updated_at"])
         views = {"comprehensive": {"points": snapshot["points"]}} if legacy else snapshot["views"]
         if not isinstance(views, dict) or (not legacy and set(views) != {"comprehensive", "software", "visual"}):
@@ -304,7 +449,7 @@ def validate_snapshot(snapshot: Any, *, legacy: bool = False) -> bool:
                 return False
         json.dumps(snapshot, allow_nan=False)
         return True
-    except (KeyError, TypeError, ValueError):
+    except (AttributeError, KeyError, TypeError, ValueError):
         return False
 
 
@@ -340,18 +485,23 @@ class RadarService:
             # correctly rejects them. Reject corrupt metadata here as well, so
             # retaining a failed attempt cannot crash the background worker.
             json.dumps(state, allow_nan=False)
-            if isinstance(state, dict) and state.get("schema_version") in (1, 2, CACHE_VERSION):
+            if isinstance(state, dict) and state.get("schema_version") in (1, 2, 3, CACHE_VERSION):
                 snapshot = state.get("snapshot")
+                if snapshot is not None and (not isinstance(snapshot, dict)
+                                             or snapshot.get("benchmark_kind") != BENCH_VERSION):
+                    # An old IQ snapshot is not a fallback for the current benchmark.
+                    for field in ("snapshot", "fetched_at_epoch", "legacy_snapshot"):
+                        state.pop(field, None)
+                    state["next_attempt_at_epoch"] = now
+                    snapshot = None
                 fetched = finite_number(state.get("fetched_at_epoch"))
                 if snapshot is None or (validate_snapshot(snapshot, legacy=state["schema_version"] == 1 or state.get("legacy_snapshot") is True) and fetched is not None and 0 < fetched <= now + 60):
                     self._state = state
-                    if snapshot is not None and (state["schema_version"] == 1 or state.get("legacy_snapshot") is True):
-                        normalize_costs(snapshot["points"])
                     if snapshot is None:
                         self._state.pop("fetched_at_epoch", None)
         except (OSError, ValueError):
             pass
-        if self._state.get("schema_version") in (1, 2):
+        if self._state.get("schema_version") in (1, 2, 3):
             self._state["next_attempt_at_epoch"] = now
             self._state["last_error"] = "Updating the Radar snapshot to the current model catalog and benchmark rules."
         # An invalid timestamp must never postpone initial recovery indefinitely.
@@ -393,17 +543,18 @@ class RadarService:
                 previous = copy.deepcopy(self._state)
                 self._refreshing = True
             try:
-                software = self._fetcher(METRICS_URL)
-                visual = self._fetcher(VISUAL_URL)
-                coverage, coverage_warning = {}, None
-                try:
-                    coverage = coverage_points(self._fetcher(COVERAGE_URL))
-                except Exception:
-                    coverage_warning = "Independent software task coverage is unavailable."
-                data = combine_snapshots(software, visual, coverage)
-                data["coverage_warning"] = coverage_warning
+                binding = bench_binding(self._fetcher(BINDING_URL))
+                summaries = []
+                for selection in binding["model_efforts"]:
+                    if self._stop.is_set() or not self._enabled.is_set():
+                        raise RuntimeError("Radar refresh stopped")
+                    url = BENCH_URL + "?" + urlencode({**selection, "view": "summary", "selection": "user-selected-v1"})
+                    summary = self._fetcher(url)
+                    bench_point(summary, binding, selection)
+                    summaries.append(summary)
+                data = bench_snapshot(binding, summaries)
                 if not validate_snapshot(data):
-                    raise ValueError("Invalid composite Radar snapshot")
+                    raise ValueError("Invalid RadarBench snapshot")
                 finished = self._clock()
                 state = {"snapshot": data, "fetched_at_epoch": finished,
                          "failures": 0, "next_attempt_at_epoch": finished + REFRESH_SECONDS}
@@ -414,7 +565,8 @@ class RadarService:
                 state = {**previous, "failures": failures,
                          "last_error": f"{type(exc).__name__}: {exc}"[:300],
                          "next_attempt_at_epoch": self._clock() + delay}
-            if state.get("snapshot") is not None and "views" not in state["snapshot"]:
+            if (state.get("snapshot") is not None and "views" not in state["snapshot"]
+                    and state["snapshot"].get("benchmark_kind") != BENCH_VERSION):
                 state["legacy_snapshot"] = True
             state.update(schema_version=CACHE_VERSION, last_attempt_at_epoch=now)
             state.pop("cache_warning", None)
@@ -467,7 +619,8 @@ SCRIPT = asset_text("static/radar.js")
 # Keep renderer grouping, supported efforts and eligibility aligned with collection.
 SCRIPT = (SCRIPT.replace("__RADAR_GENERATIONS__", json.dumps(MODEL_GROUPS))
           .replace("__RADAR_MODEL_EFFORTS__", json.dumps(MODEL_EFFORTS))
-          .replace("__RADAR_THRESHOLD_MODELS__", json.dumps(sorted(NEW_GPT6))))
+          .replace("__RADAR_THRESHOLD_MODELS__", json.dumps(sorted(NEW_GPT6)))
+          .replace("__RADAR_BENCH_EFFORTS__", json.dumps(BENCH_EFFORTS)))
 
 
 def main() -> None:

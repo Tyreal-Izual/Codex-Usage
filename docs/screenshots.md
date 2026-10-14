@@ -7,8 +7,8 @@ these screenshots show the interface with illustrative usage, project,
 and service-status data. The Radar chart uses a cached public benchmark snapshot.
 They are feature examples, not live account usage, official ratings, or current
 service-status reports.
-The Radar screenshot predates the GPT-6/GPT-5 tabs, benchmark views, and GPT-6.1
-score cards; see [Codex Radar benchmark curves](radar.md)
+The Radar screenshot shows legacy IQ and predates the current RadarBench scores,
+coverage and daily history; see [Codex Radar benchmarks](radar.md)
 for the current behaviour.
 
 <!-- markdownlint-disable MD033 -- HTML keeps the screenshot gallery compact on GitHub. -->
