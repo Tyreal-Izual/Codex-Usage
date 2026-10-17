@@ -10,7 +10,7 @@ when that card is present. It also works when Radar is the only enabled source.
 ## Current benchmark: RadarBench
 
 The integration follows the [public Radar site](https://codexradar.com/)'s
-2026-10-13 RadarBench contract. The old composite IQ / software / visual views
+2026-10-17 public summary v6 contract (with retained v5 cache compatibility). The old composite IQ / software / visual views
 are legacy benchmarks and must not be compared with the new scores.
 
 - The verified catalog contains 64 tasks from DeepSWE, Pompeii, TB4 and Science.
@@ -22,16 +22,15 @@ are legacy benchmarks and must not be compared with the new scores.
   **max**. The old 30-sample eligibility threshold does not apply to RadarBench.
 - Cards show **Provisional**, **Complete** or **Not graded**, task coverage out
   of 64, and the number of records used for scoring (up to three per covered task).
-- Cost means **API-equivalent USD**, not subscription deductions or cash charges.
-  Cost and duration use all evidenced valid grades for the current task set and
-  configuration; their sample window differs from the score's latest-three rule.
-  Each metric shows known/total samples. Partial means use only known samples;
-  unavailable or invalid statistics do not erase a valid score.
-- The chart and its controls appear above the score cards. The default chart shows daily score history for one model, with distinct effort
-  markers and line styles. Select another model or switch to cost/time versus
-  score. Daily history is the final score per **UTC grading day**; days without
-  grades are omitted, and the date is not an exact grading timestamp. The data
-  table includes both current scores and the selected model's history.
+- The panel shows only the authoritative **total Radar score**, grouped into
+  model rows with effort cards ordered ultra → low. Each card shows a one-decimal
+  score and a thin bar with width **score / 150 × 100%**. The scale is fixed across
+  all models, not normalized to the best score in each row. Luna starts at max.
+- A real zero shows `0.0` with an empty bar; missing results show `—` with a dashed
+  placeholder. Coverage, grading-record count and status remain as context.
+- The history chart, model selector, cost/time views and source-specific score
+  tabs are removed. The expandable table contains current scores only. Narrow
+  screens wrap cards into three or two columns.
 
 ## Synchronization and cache
 
@@ -42,12 +41,13 @@ bounded timeouts and response sizes. Browser refresh only reads the authenticate
 The browser need not stay open. Sleep or offline time can delay synchronization.
 
 The title age is time since the last successful **local sync**. The latest UTC
-grading day is shown separately. The public summary does not provide exact
-individual grading timestamps.
+grading day is shown separately, based on the source daily history. It is not
+the exact grading timestamp. History remains in the cache but is not displayed.
 
 A refresh replaces the cache only after all configurations pass validation for
 the same catalog and task digest. Failure retains the last successful snapshot
-and retries after 15, 30, 60, 120, then at most 240 minutes. Old cache versions
+and retries after 15, 30, 60, 120, then at most 240 minutes. The previous v5
+RadarBench summaries remain valid fallback scores during the v6 upgrade. Old cache versions
 trigger an immediate upgrade. Legacy IQ is never displayed, including on failure:
 without a valid RadarBench snapshot the panel shows an unavailable message.
 Only successful RadarBench snapshots are retained as fallback.

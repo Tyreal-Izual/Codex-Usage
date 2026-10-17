@@ -44,14 +44,14 @@ selection when the server restarts. Explicit `--sources` selections determine in
 工具栏保留 Report／语言／自动刷新／刷新，并加入默认勾选的 Isambard Status 和 Codex Radar。
 Local Days 与 Refresh Seconds 仅通过本地启动参数调整。关闭来源不会删除缓存。
 
-Radar displays only the current **RadarBench** results. Charts and their controls
-appear above the score cards; the default is daily history for GPT-6.1 Sol.
-Legacy IQ caches are not displayed. If the first RadarBench fetch fails, the panel
-shows an unavailable state; later failures retain the last valid RadarBench snapshot.
+Radar displays only **RadarBench total score cards**, grouped by model. Each
+card shows a one-decimal score and a thin bar scaled to **score / 150**. History
+charts, model/metric selectors, costs and duration are omitted. Missing scores
+are shown as `—`, distinct from `0.0`. Only RadarBench snapshots can be fallback.
 
-Radar 仅展示新版 **RadarBench**：图表和切换控件在上，评分卡片在下，默认显示
-GPT-6.1 Sol 的每日趋势。旧 IQ 缓存不再展示；首次获取失败时提示暂不可用，
-已有新版快照时则保留上次成功结果。更新代码后需重启网页服务。
+Radar 仅展示新版**总雷达分卡片**：按模型分行，分数保留一位小数，细条按分数 ÷ 150
+显示。移除历史曲线、模型/指标选择器和费用耗时。缺失分数以 `—` 表示，与 `0.0` 区分。
+只使用有效新版快照回退；更新代码后需重启网页服务。
 
 ## Refresh behavior / 刷新行为
 

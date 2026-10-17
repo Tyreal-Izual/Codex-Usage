@@ -58,5 +58,6 @@ they do not establish visual correctness on every browser.
 - RadarBench scores are consumed without regrading; zero and missing scores remain distinct.
 - Radar refreshes validate all model selections against the same catalog before replacing the snapshot.
 - Old IQ caches are never displayed; only valid RadarBench snapshots can be used as fallback.
-- Radar charts and controls precede score cards in both languages and all chart modes.
+- Radar cards use a fixed score/150 bar scale in both languages; zero and missing scores differ.
+- No history charts, metric selectors or cost/time columns are rendered.
 - Core collectors raise structured errors; only the CLI prints its error messages.

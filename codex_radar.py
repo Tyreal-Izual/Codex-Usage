@@ -2,7 +2,7 @@
 """Codex Radar collector, four-hour cache worker, and standalone dashboard widget.
 
 Only public benchmark metadata is requested. No account or transcript data is
-sent. The RadarBench integration follows https://codexradar.com/ (2026-10-13).
+sent. The RadarBench integration follows https://codexradar.com/ (2026-10-17).
 Run this file directly to update the cache once; the web server owns the worker.
 """
 
@@ -27,7 +27,7 @@ SOURCE_URL = "https://codexradar.com/"
 METRICS_URL = SOURCE_URL + "api/intelligence-efficiency-metrics"
 VISUAL_URL = SOURCE_URL + "api/visual-spatial-reasoning"
 COVERAGE_URL = SOURCE_URL + "api/intelligence-efficiency-coverage"
-CACHE_VERSION = 4
+CACHE_VERSION = 5
 REFRESH_SECONDS = 4 * 60 * 60
 RETRY_SECONDS = 15 * 60
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
@@ -337,7 +337,8 @@ def bench_statistics(value: dict[str, Any]) -> dict[str, Any]:
 
 
 def bench_point(value: dict[str, Any], binding: dict[str, Any], selection: dict[str, str]) -> dict[str, Any]:
-    if (value.get("schema") != "radar-bench-public-summary-v5-150-daily-graded-count"
+    if (value.get("schema") not in {"radar-bench-public-summary-v5-150-daily-graded-count",
+                                    "radar-bench-public-summary-v6-150-details"}
             or value.get("scoring_policy_version") != "radar-bench-v2-last3-per-task-equal-weight-150"
             or any(value.get(k) != binding[k] for k in ("benchmark", "catalog_version", "task_set_sha256",
                                                        "score_version", "score_max", "source_counts"))
@@ -485,7 +486,7 @@ class RadarService:
             # correctly rejects them. Reject corrupt metadata here as well, so
             # retaining a failed attempt cannot crash the background worker.
             json.dumps(state, allow_nan=False)
-            if isinstance(state, dict) and state.get("schema_version") in (1, 2, 3, CACHE_VERSION):
+            if isinstance(state, dict) and state.get("schema_version") in (1, 2, 3, 4, CACHE_VERSION):
                 snapshot = state.get("snapshot")
                 if snapshot is not None and (not isinstance(snapshot, dict)
                                              or snapshot.get("benchmark_kind") != BENCH_VERSION):
@@ -501,7 +502,7 @@ class RadarService:
                         self._state.pop("fetched_at_epoch", None)
         except (OSError, ValueError):
             pass
-        if self._state.get("schema_version") in (1, 2, 3):
+        if self._state.get("schema_version") in (1, 2, 3, 4):
             self._state["next_attempt_at_epoch"] = now
             self._state["last_error"] = "Updating the Radar snapshot to the current model catalog and benchmark rules."
         # An invalid timestamp must never postpone initial recovery indefinitely.
@@ -616,11 +617,8 @@ STYLE = asset_text("static/radar.css")
 SCRIPT = asset_text("static/radar.js")
 
 
-# Keep renderer grouping, supported efforts and eligibility aligned with collection.
-SCRIPT = (SCRIPT.replace("__RADAR_GENERATIONS__", json.dumps(MODEL_GROUPS))
-          .replace("__RADAR_MODEL_EFFORTS__", json.dumps(MODEL_EFFORTS))
-          .replace("__RADAR_THRESHOLD_MODELS__", json.dumps(sorted(NEW_GPT6)))
-          .replace("__RADAR_BENCH_EFFORTS__", json.dumps(BENCH_EFFORTS)))
+# Keep the score renderer model/effort catalog aligned with collection.
+SCRIPT = SCRIPT.replace("__RADAR_BENCH_EFFORTS__", json.dumps(BENCH_EFFORTS))
 
 
 def main() -> None:

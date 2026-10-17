@@ -8,7 +8,7 @@ and service-status data. The Radar chart uses a cached public benchmark snapshot
 They are feature examples, not live account usage, official ratings, or current
 service-status reports.
 The Radar screenshot shows legacy IQ and predates the current RadarBench scores,
-coverage and daily history; see [Codex Radar benchmarks](radar.md)
+coverage and score/150 card bars; see [Codex Radar benchmarks](radar.md)
 for the current behaviour.
 
 <!-- markdownlint-disable MD033 -- HTML keeps the screenshot gallery compact on GitHub. -->

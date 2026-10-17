@@ -56,7 +56,7 @@ def bench_fixtures():
     for selection in binding["model_efforts"]:
         grade = {"score": 105, "coverage": 50, "required_tasks": 64, "score_status": "provisional"}
         summaries.append({**{k: binding[k] for k in ("benchmark", "catalog_version", "task_set_sha256", "score_version", "score_max", "source_counts")},
-            "schema": "radar-bench-public-summary-v5-150-daily-graded-count",
+            "schema": "radar-bench-public-summary-v6-150-details",
             "scoring_policy_version": "radar-bench-v2-last3-per-task-equal-weight-150",
             **selection, **grade, "graded_runs_count": 100,
             "statistics_state": "available", "statistics": {"sample_count": 100,
@@ -81,6 +81,21 @@ class RadarBenchTest(unittest.TestCase):
         self.assertEqual(point['average_minutes'], 10)
         self.assertEqual(point['average_price_usd'], .5)
         self.assertEqual(snapshot['source_updated_at'], '2026-10-13T00:00:00+00:00')
+
+    def test_v6_summary_uses_authoritative_total_not_new_detail_dimensions(self):
+        binding, summaries = bench_fixtures()
+        value = summaries[0]
+        value['source_scores'] = {'science': {'score': 12}}
+        value['detail_metrics'] = {'latest_graded_at': '2026-10-17T17:26:13Z'}
+        point = radar.bench_point(value, binding, binding['model_efforts'][0])
+        self.assertEqual(point['iq'], 105)
+        self.assertNotIn('source_scores', point)
+        # Same scoring contract in the older retained public summary.
+        value['schema'] = 'radar-bench-public-summary-v5-150-daily-graded-count'
+        self.assertEqual(radar.bench_point(value, binding, binding['model_efforts'][0])['iq'], 105)
+        value['schema'] = 'unknown-future-schema'
+        with self.assertRaises(ValueError):
+            radar.bench_point(value, binding, binding['model_efforts'][0])
 
     def test_zero_score_and_missing_score_are_distinct_without_legacy_threshold(self):
         binding, summaries = bench_fixtures()
@@ -434,6 +449,28 @@ class ServiceTest(unittest.TestCase):
         self.assertEqual(service.snapshot()['data']['benchmark_kind'], radar.BENCH_VERSION)
         self.assertNotIn('views', service.snapshot()['data'])
 
+    def test_version_four_cache_forces_v6_refresh_and_retains_scores_on_failure(self):
+        binding, summaries = bench_fixtures()
+        for summary in summaries:
+            summary['schema'] = 'radar-bench-public-summary-v5-150-daily-graded-count'
+        snapshot = radar.bench_snapshot(binding, summaries)
+        self.path.write_text(json.dumps({'schema_version':4, 'snapshot':snapshot,
+            'fetched_at_epoch':self.now, 'next_attempt_at_epoch':self.now+radar.REFRESH_SECONDS}))
+        service = radar.RadarService(self.path, clock=lambda:self.now, fetcher=self.fetch)
+        self.assertTrue(service.snapshot()['available'])
+        self.error = OSError('offline')
+        self.assertFalse(service.refresh_if_due())
+        self.assertEqual(service.snapshot()['data'], snapshot)
+        restarted = radar.RadarService(self.path, clock=lambda:self.now, fetcher=self.fetch)
+        count = len(self.calls)
+        self.assertFalse(restarted.refresh_if_due())
+        self.assertEqual(len(self.calls), count)
+        self.now += radar.RETRY_SECONDS
+        self.error = None
+        self.assertTrue(restarted.refresh_if_due())
+        self.assertEqual(restarted.snapshot()['data']['summaries'][0]['schema'],
+                         'radar-bench-public-summary-v6-150-details')
+
     def test_invalid_statistics_keep_valid_scores(self):
         original = self.service._fetcher
         def fetch(url):
@@ -623,46 +660,50 @@ class RadarRendererTest(unittest.TestCase):
             text=True, capture_output=True, check=True, timeout=5,
         ).stdout
 
-    def test_bench_cards_and_daily_curves_use_new_labels_and_six_sol_efforts(self):
+    def test_score_meters_use_fixed_150_scale_not_family_maximum(self):
         snapshot = radar.bench_snapshot(*bench_fixtures())
-        result = json.loads(self.render_script('const data='+json.dumps(snapshot)+''';
-          mode='bench'; root={clientWidth:1000}; visiblePoints=data.points;
-          process.stdout.write(JSON.stringify({cards:benchCards(data.points),history:benchHistory(data.points)}));
-        '''))
-        families = ET.fromstring('<root>'+result['cards']+'</root>')
-        sol = next(f for f in families if f.findtext('h3')=='GPT-6.1 Sol')
-        buttons = sol.findall('./div/button')
-        self.assertEqual([b.text for b in buttons], ['ultra','max','xhigh','high','medium','low'])
-        self.assertIn('Radar score', buttons[0].get('aria-label'))
-        self.assertIn('50/64', result['cards'])
-        self.assertIn('100/100', result['cards'])
-        history = ET.fromstring('<root>'+result['history']+'</root>')
-        self.assertEqual(len(history.findall('./svg/g')), 6)
-        self.assertIn('2026-10-13 UTC', result['history'])
-        self.assertNotIn('NaN', result['history'])
-        self.assertNotIn('Infinity', result['history'])
+        values = [None, 0, 75, 107.3, 150]
+        for point, value in zip(snapshot['points'], values):
+            point['iq'] = value
+        html = self.render_script('process.stdout.write(benchCards('+json.dumps(snapshot['points'])+'));')
+        tree = ET.fromstring('<root>'+html+'</root>')
+        cards = {b.get('data-radar-card'): b for b in tree.findall('./div/div/button')}
+        for index, value in enumerate(values):
+            card = cards[str(index)]
+            meter = card.find("span[@aria-hidden='true']")
+            fill = meter.find('span')
+            if value is None:
+                self.assertEqual(card.findtext('strong'), '—')
+                self.assertIsNone(fill)
+                self.assertIn('radar-meter--missing', meter.get('class'))
+            else:
+                self.assertEqual(card.findtext('strong'), f'{value:.1f}')
+                width = float(fill.get('style').removeprefix('width:').removesuffix('%'))
+                self.assertAlmostEqual(width, value / 150 * 100, places=4)
+                self.assertIn('/ 150', card.get('aria-label'))
+        sol = next(f for f in tree if f.findtext('h3')=='GPT-6.1 Sol')
+        self.assertEqual([b.findtext('./span/span') for b in sol.findall('./div/button')],
+                         ['ultra','max','xhigh','high','medium','low'])
 
-    def test_complete_bench_markup_in_both_languages_and_metric_modes(self):
+    def test_score_cards_in_both_languages_have_no_chart_or_cost_controls(self):
         snapshot = radar.bench_snapshot(*bench_fixtures())
-        result = json.loads(self.render_script('payload={data:'+json.dumps(snapshot)+'};'+'''
+        result = json.loads(self.render_script('payload={data:'+json.dumps(snapshot)+'};'+"""
           const document={activeElement:null};
           root={clientWidth:390,contains:()=>false,querySelector:()=>({addEventListener:()=>{}})};
           const output=[];
-          for (const language of ['en','zh']) for (const selectedMetric of ['history','time','price']) {
-            lang=language; metric=selectedMetric; renderBench(); output.push(root.innerHTML);
+          for (const language of ['en','zh']) {
+            lang=language; renderBench(); output.push(root.innerHTML);
           }
           process.stdout.write(JSON.stringify(output));
-        '''))
-        self.assertEqual(len(result), 6)
+        """))
+        self.assertEqual(len(result), 2)
         for html in result:
             self.assertEqual(html.count('data-radar-card='), 34)
-            self.assertLess(html.index('class="radar-chart"'), html.index('class="radar-family"'))
+            self.assertEqual(html.count('class="radar-meter"'), 34)
             self.assertIn('RadarBench', html)
-            self.assertNotIn('undefined', html)
-            self.assertNotIn('NaN', html)
-            self.assertNotIn('Infinity', html)
-        self.assertIn('每日雷达分趋势', result[3])
-        self.assertIn('平均 API 等价', result[5])
+            for removed in ('data-radar-metric', 'data-radar-history-model', '<svg', 'API', 'USD', '费用', '耗时', 'NaN', 'Infinity', 'undefined'):
+                self.assertNotIn(removed, html)
+        self.assertIn('分数和条 = 雷达分 / 满分 150', result[1])
 
     def test_loading_failure_and_legacy_payload_never_render_old_scores(self):
         old = radar.combine_snapshots(*fixtures())
@@ -685,82 +726,18 @@ class RadarRendererTest(unittest.TestCase):
         self.assertEqual(retained.count('data-radar-card='), 34)
         self.assertIn('Showing the last successful snapshot', retained)
 
-    def test_gpt61_frontend_group_and_placeholder_efforts_match_collector(self):
-        output=self.render_script('''
-          const views = ['comprehensive', 'software', 'visual'].map(value => {
-            mode=value;
-            generation='gpt6'; const gpt6=cards([], {});
-            generation='gpt5'; return {gpt6, gpt5:cards([], {})};
-          });
-          process.stdout.write(JSON.stringify({models:Object.keys(models), groups:generationModels, views}));
-        ''')
-        result=json.loads(output)
-        self.assertEqual(set(result["models"]),set(radar.MODEL_NAMES))
-        self.assertIn("gpt-6.1-sol",result["groups"]["gpt6"])
-        self.assertNotIn("gpt-6.1-sol",result["groups"]["gpt5"])
-        for view in result["views"]:
-            families=ET.fromstring('<root>'+view["gpt6"]+'</root>')
-            family=next(f for f in families if f.findtext('h3')=='GPT-6.1 Sol')
-            scores=family.findall('./div/div')
-            self.assertEqual([s.text for s in scores], ['max', 'xhigh', 'high', 'medium', 'low'])
-            self.assertTrue(all(s.findtext('strong')=='—' for s in scores))
-            self.assertTrue(all(s.findtext('small')=='Insufficient data' for s in scores))
-            self.assertNotIn('GPT-6.1 Sol', view["gpt5"])
-
-    def test_gpt61_eligible_scores_render_as_cards_and_chart_points(self):
-        software, visual = fixtures()
-        for payload, weight in ((software, 'total'), (visual, 'valid_tasks')):
-            template = payload['points'][0]
-            payload['points'].extend({**template, 'model':'gpt-6.1-sol', 'effort':effort,
-                                      weight:30} for effort in ('low', 'medium', 'high', 'xhigh', 'max'))
-        snapshot = radar.combine_snapshots(software, visual)
-        output = self.render_script('const data='+json.dumps(snapshot)+''';
-          root={clientWidth:1000};
-          const views=Object.entries(data.views).map(([name, view])=>{
-            mode=name;
-            visiblePoints=view.points.filter(p=>generationModels.gpt6.includes(p.model));
-            return {cards:cards(visiblePoints,data), chart:chart(visiblePoints)};
-          });
-          process.stdout.write(JSON.stringify(views));
-        ''')
-        for view in json.loads(output):
-            families=ET.fromstring('<root>'+view['cards']+'</root>')
-            family=next(f for f in families if f.findtext('h3')=='GPT-6.1 Sol')
-            buttons=family.findall('./div/button')
-            self.assertEqual(len(buttons), 5)
-            svg=ET.fromstring(view['chart'])
-            labels=[p.get('aria-label') for p in svg.findall('g')]
-            for button in buttons:
-                self.assertIn(button.get('aria-label'), labels)
-                self.assertNotEqual(button.findtext('strong'), '—')
-            self.assertNotIn('NaN', view['chart'])
-            self.assertNotIn('Infinity', view['chart'])
-
-    def test_two_distinct_costs_have_unique_ticks_and_use_full_plot_width(self):
-        for costs in ((1, 100), (1, 1, 100)):
-            with self.subTest(costs=costs):
-                points = [{"model": "gpt-6-astra", "effort": radar.EFFORTS[i], "iq": 90 + i * 5,
-                           "average_price_usd": cost, "average_minutes": 10,
-                           "combined_cost_index": cost} for i, cost in enumerate(costs)]
-                source = "root={clientWidth:1000}; visiblePoints=" + json.dumps(points)
-                source += "; process.stdout.write(chart(visiblePoints));"
-                output = self.render_script(source)
-                svg = ET.fromstring(output)
-                ticks = []
-                for element in svg.findall("text"):
-                    if element.get("text-anchor") != "middle":
-                        continue
-                    try:
-                        value = float(element.text)
-                    except (ValueError, TypeError):
-                        continue
-                    ticks.append((float(element.get("x")), value))
-                positions = [x for x, _ in ticks]
-                self.assertGreaterEqual(len(ticks), 2)
-                self.assertEqual(len(positions), len(set(positions)))
-                self.assertEqual(ticks[0][1], min(costs))
-                self.assertEqual(ticks[-1][1], max(costs))
-                self.assertGreater(ticks[-1][0], 900)
+    def test_missing_and_zero_scores_remain_distinct_in_score_cards(self):
+        snapshot = radar.bench_snapshot(*bench_fixtures())
+        snapshot['points'][0].update(iq=None, coverage=0, score_status='missing_current_result')
+        snapshot['points'][1].update(iq=0, coverage=1, score_status='provisional')
+        html = self.render_script('process.stdout.write(benchCards('+json.dumps(snapshot['points'])+'));')
+        tree = ET.fromstring('<root>'+html+'</root>')
+        buttons = tree.findall('./div/div/button')
+        by_index = {b.get('data-radar-card'):b for b in buttons}
+        self.assertEqual(by_index['0'].findtext('strong'), '—')
+        self.assertIn('Not graded', by_index['0'].get('aria-label'))
+        self.assertEqual(by_index['1'].findtext('strong'), '0.0')
+        self.assertIn('Provisional', by_index['1'].get('aria-label'))
 
 
 class RadarAPITest(unittest.TestCase):
