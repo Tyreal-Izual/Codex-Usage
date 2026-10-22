@@ -3,8 +3,9 @@
 [返回快速开始](../README.zh-CN.md)
 
 Radar 默认启用，可通过工具栏复选框暂停或恢复采集。采集器仍在 `codex_radar.py`，
-图表资源位于 `static/radar.js` 和 `static/radar.css`。存在 Banked Resets 卡片时，
+卡片资源位于 `static/radar.js` 和 `static/radar.css`。存在 Banked Resets 卡片时，
 Radar 放在它的下方；也支持只启用 Radar 来源。
+[查看当前卡片截图](screenshots.md#current-radar-score-cards)。
 
 ## 当前基准：RadarBench
 
@@ -51,6 +52,15 @@ python3 codex_radar.py --force         # 立即刷新磁盘缓存
 python3 codex_radar.py --cache /tmp/radar.json
 ```
 
-独立命令更新的磁盘缓存会在网页服务下次启动时加载。代码升级后需要重启网页服务，
+如果网页服务使用了 `--cache-dir`，独立刷新命令的 `--cache` 也应指向该目录中的
+`codex_radar_snapshot.json`。注意 `--cache` 接收文件路径，`--cache-dir` 接收目录：
+
+```sh
+python3 codex_radar.py --cache /tmp/codex-usage-cache/codex_radar_snapshot.json --force
+python3 codex_claude_usage_web.py --cache-dir /tmp/codex-usage-cache
+```
+
+先停止正在运行的网页服务，再独立强制更新它使用的缓存，最后重启服务，避免两个进程
+同时写入同一文件。独立命令不会修改运行中服务的内存数据。代码升级后也需要重启网页服务，
 无需另设定时任务。上游目录或响应不兼容时保留最后有效缓存。
 分数来自社区评测，不代表账户用量或官方模型评分。

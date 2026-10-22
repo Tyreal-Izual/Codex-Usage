@@ -3,9 +3,10 @@
 [Back to quick start](../README.md)
 
 Radar is enabled by default; use the toolbar checkbox to pause/resume collection.
-The collector remains in `codex_radar.py`, with editable chart assets in
+The collector remains in `codex_radar.py`, with editable card assets in
 `static/radar.js` and `static/radar.css`. The panel appears below Banked Resets
 when that card is present. It also works when Radar is the only enabled source.
+[View the current card layout](screenshots.md#current-radar-score-cards).
 
 ## Current benchmark: RadarBench
 
@@ -63,7 +64,18 @@ python3 codex_radar.py --force         # refresh the disk cache now
 python3 codex_radar.py --cache /tmp/radar.json
 ```
 
-Standalone updates are loaded by the web service on its next restart. Restart a
+If the web server uses `--cache-dir`, pass that directory's
+`codex_radar_snapshot.json` file to the standalone command's `--cache` option;
+`--cache` takes a file path, not a directory. For example:
+
+```sh
+python3 codex_radar.py --cache /tmp/codex-usage-cache/codex_radar_snapshot.json --force
+python3 codex_claude_usage_web.py --cache-dir /tmp/codex-usage-cache
+```
+
+Stop the running dashboard before forcing a standalone update to its cache, then
+restart it. This avoids two writers using the same file; the standalone command
+does not update a running service's in-memory data. Restart a
 running dashboard after upgrading the code. No separate scheduler is required.
 An incompatible source catalog or response leaves the last valid cache intact.
 Scores are community benchmarks, not account usage or official model ratings.
