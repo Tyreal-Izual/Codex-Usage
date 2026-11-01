@@ -5,8 +5,8 @@
 A local dashboard for subscription limits, token history, models and sessions.
 **Python 3.10+ · no third-party dependencies · one command to start.**
 Codex and Claude Code work independently; public Isambard status and Codex Radar benchmarks are optional.
-Radar now shows [RadarBench score cards and coverage](docs/radar.md),
-including GPT-6.1 Sol ultra, with four-hour background synchronization.
+Radar now shows [homepage degradation score cards](docs/radar.md),
+including GPT-6.1 Terra, with four-hour synchronization and bounded timeout retries.
 Each card shows its score and a bar scaled to 150; history charts and cost/time views are omitted.
 
 ## Quick start

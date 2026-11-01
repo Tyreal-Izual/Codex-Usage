@@ -1,62 +1,61 @@
-# Codex Radar benchmarks
+# Codex degradation radar
 
 [Back to quick start](../README.md)
 
-Radar is enabled by default; use the toolbar checkbox to pause/resume collection.
-The collector remains in `codex_radar.py`, with editable card assets in
-`static/radar.js` and `static/radar.css`. The panel appears below Banked Resets
-when that card is present. It also works when Radar is the only enabled source.
-[View the current card layout](screenshots.md#current-radar-score-cards).
+Radar is enabled by default; use its toolbar checkbox to pause/resume collection.
+`codex_radar.py` owns collection and caching; `static/radar.js` and `static/radar.css`
+render the cards. The panel appears below Banked Resets when present and also
+works when Radar is the only enabled source.
 
-## Current benchmark: RadarBench
+## Current source and display
 
-The integration follows the [public Radar site](https://codexradar.com/)'s
-2026-10-17 public summary v6 contract (with retained v5 cache compatibility). The old composite IQ / software / visual views
-are legacy benchmarks and must not be compared with the new scores.
+The integration follows the [homepage degradation radar](https://codexradar.com/#stationmaster-round)
+as verified on **2026-10-31**. This assessment uses Qin Shi Huang, Pompeii, Pelican
+and Candy. It is separate from the previous 64-task RadarBench; scores from those
+benchmarks are never mixed or used as fallback for this one.
 
-- The verified catalog contains 64 tasks from DeepSWE, Pompeii, TB4 and Science.
-  Scores are on a 0–150 scale and are read directly from the public summary API.
-  Scoring uses each task's latest three valid grades, with equal weight among
-  covered tasks. Missing tasks are not zero; a real zero score is retained.
-- The current display includes Astra, 6.1 Sol, 6 Sol, 5.6 Sol, 6 Luna and
-  5.6 Luna: 34 configurations. Sol and Astra include **ultra**; Luna stops at
-  **max**. The old 30-sample eligibility threshold does not apply to RadarBench.
-- Cards show **Provisional**, **Complete** or **Not graded**, task coverage out
-  of 64, and the number of records used for scoring (up to three per covered task).
-- The panel shows only the authoritative **total Radar score**, grouped into
-  model rows with effort cards ordered ultra → low. Each card shows a one-decimal
-  score and a thin bar with width **score / 150 × 100%**. The scale is fixed across
-  all models, not normalized to the best score in each row. Luna starts at max.
-- A real zero shows `0.0` with an empty bar; missing results show `—` with a dashed
-  placeholder. Coverage, grading-record count and status remain as context.
-- The history chart, model selector, cost/time views and source-specific score
-  tabs are removed. The expandable table contains current scores only. Narrow
-  screens wrap cards into three or two columns.
+- The collector reads the already-published **total / 150** from the homepage's
+  total-score table. It does not reconstruct totals from component scores or
+  execute scripts, download artwork, or read account data.
+- The reviewed catalog has 46 configurations across GPT-6.1 Sol, GPT-6 Astra,
+  GPT-6.1 Terra, GPT-6 Sol, GPT-6 Luna, GPT-5.6 Sol, GPT-5.6 Terra and GPT-5.6 Luna.
+  Luna supports low through max; the other families include ultra.
+- Cards show only the score and a thin bar with width **score / 150 × 100%**.
+  Scores use two decimal places, matching the published totals. All models share
+  the fixed 150-point scale. Zero is `0.00` with an empty bar; missing scores are
+  `—` with a dashed placeholder. Cost, duration, historical curves and the old
+  RadarBench coverage/record counts are not shown.
+- The title age measures time since the last successful **local sync**. The source
+  test period is shown separately: the homepage publishes its start/end to the
+  minute in Beijing time, which the dashboard displays in the browser's timezone.
+  A successful sync does not mean the source ran a new test round.
 
-## Synchronization and cache
+## Refresh and failure handling
 
-While enabled and the server is running, the worker reads the public binding
-and each of its 34 configurations sequentially every four hours. Requests have
-bounded timeouts and response sizes. Browser refresh only reads the authenticated
-`GET /api/codex-radar` memory cache and never starts an upstream request.
-The browser need not stay open. Sleep or offline time can delay synchronization.
+The worker makes **one homepage request every four hours** while enabled and the
+server is running. The authenticated `GET /api/codex-radar` endpoint reads memory
+only. Browser refresh never triggers an upstream fetch; the browser need not stay
+open. Sleep or offline time can delay synchronization.
 
-The title age is time since the last successful **local sync**. The latest UTC
-grading day is shown separately, based on the source daily history. It is not
-the exact grading timestamp. History remains in the cache but is not displayed.
+Each request uses a 20-second socket timeout and a 4 MiB response limit. Timeouts,
+connection failures and HTTP 502/503/504 receive at most **two additional attempts**,
+after 1 and 3 seconds. Pause/stop interrupts the wait before another request.
+Invalid data, certificate errors and other HTTP errors are not retried immediately.
+After all attempts fail, the last successful degradation snapshot remains visible
+with its original sync time. Scheduled retries back off for 15, 30, 60, 120, then
+at most 240 minutes, and their deadline survives restart.
 
-A refresh replaces the cache only after all configurations pass validation for
-the same catalog and task digest. Failure retains the last successful snapshot
-and retries after 15, 30, 60, 120, then at most 240 minutes. The previous v5
-RadarBench summaries remain valid fallback scores during the v6 upgrade. Old cache versions
-trigger an immediate upgrade. Legacy IQ is never displayed, including on failure:
-without a valid RadarBench snapshot the panel shows an unavailable message.
-Only successful RadarBench snapshots are retained as fallback.
+All 46 configurations, the four-component/150-point heading, the source test period,
+and score ranges must pass validation before replacing the cache. A partial page,
+changed catalog or older test period leaves the last valid snapshot intact. Source
+HTML changes may require an adapter update. Earlier IQ and RadarBench caches are
+discarded from display; upgrading triggers an immediate fetch of the new source.
+
+## Cache and manual update
 
 The default cache is `codex_radar_snapshot.json` in the per-user cache directory
-(`CODEX_USAGE_CACHE_DIR` overrides it). It contains public benchmark metadata,
-no account credentials. The source checkbox pauses subsequent requests; an
-already-running request may finish before the worker observes the change.
+(`CODEX_USAGE_CACHE_DIR` overrides it). Only normalized model IDs, efforts, totals
+and test-period metadata are stored; the source page and artwork are not retained.
 
 ```sh
 python3 codex_radar.py                 # update if due, then print JSON
@@ -64,18 +63,15 @@ python3 codex_radar.py --force         # refresh the disk cache now
 python3 codex_radar.py --cache /tmp/radar.json
 ```
 
-If the web server uses `--cache-dir`, pass that directory's
-`codex_radar_snapshot.json` file to the standalone command's `--cache` option;
-`--cache` takes a file path, not a directory. For example:
+If the web server uses `--cache-dir`, point the standalone command's `--cache` at
+that directory's `codex_radar_snapshot.json` file. Stop the dashboard before a
+standalone cache update, then restart it; the command does not update a running
+service's memory and two processes should not write the same cache concurrently.
 
 ```sh
 python3 codex_radar.py --cache /tmp/codex-usage-cache/codex_radar_snapshot.json --force
 python3 codex_claude_usage_web.py --cache-dir /tmp/codex-usage-cache
 ```
 
-Stop the running dashboard before forcing a standalone update to its cache, then
-restart it. This avoids two writers using the same file; the standalone command
-does not update a running service's in-memory data. Restart a
-running dashboard after upgrading the code. No separate scheduler is required.
-An incompatible source catalog or response leaves the last valid cache intact.
-Scores are community benchmarks, not account usage or official model ratings.
+Restart the service after upgrading the code. No separate scheduler is required.
+These are community assessments, not account usage or official model ratings.

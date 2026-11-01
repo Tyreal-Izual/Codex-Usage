@@ -2,7 +2,19 @@
 
 [Quick start](../README.md)
 
-## Current Radar score cards
+## Current degradation radar
+
+Captured on **2026-10-31** using the homepage's public four-component assessment.
+The panel shows total scores and fixed score/150 bars only, including GPT-6.1 Terra.
+Account sources were disabled for the preview; no account data are shown.
+These are scores from the displayed test round, not continuously changing live values.
+
+[![Current degradation radar with total scores and score/150 bars](../img/dashboard/degradation-score-cards.jpg)](../img/dashboard/degradation-score-cards.jpg)
+
+## Earlier RadarBench score cards
+
+This earlier 64-task benchmark has been replaced by the homepage degradation assessment.
+The card style remains similar, but the models and scoring basis have changed.
 
 Captured on **2026-10-17** from the dashboard using a public RadarBench snapshot.
 Only Radar was enabled for this preview; Codex and Claude account data are absent.
@@ -17,7 +29,7 @@ See [Radar behaviour](radar.md) / [中文说明](radar.zh-CN.md) for scoring and
 
 The thumbnails below were captured on **2026-09-16** with illustrative usage,
 project and service-status data. They document earlier layouts and may differ
-from the current toolbar. Image 7 shows the retired IQ chart; the current Radar
+from the current toolbar. Image 7 shows the retired IQ chart; a later RadarBench
 layout is shown above. They are feature examples, not live account usage,
 official ratings or current service-status reports. Click a thumbnail for full size.
 

@@ -55,9 +55,10 @@ they do not establish visual correctness on every browser.
 - A source cache coalesces matching work without blocking unrelated sources.
 - Disabled sources never start new collection work (already-running fetches may finish); `--check` never launches clients.
 - Failed disk writes retain useful live results and clean up temporary files.
-- RadarBench scores are consumed without regrading; zero and missing scores remain distinct.
-- Radar refreshes validate all model selections against the same catalog before replacing the snapshot.
-- Old IQ caches are never displayed; only valid RadarBench snapshots can be used as fallback.
+- Homepage degradation totals are read without recomputing component scores; zero and missing remain distinct.
+- Radar refreshes require a complete 46-configuration total panel before replacing the snapshot.
+- Old IQ/RadarBench caches are never displayed; only current degradation snapshots are fallback.
 - Radar cards use a fixed score/150 bar scale in both languages; zero and missing scores differ.
+- Transient network retries are bounded and interruptible; invalid pages are not retried immediately.
 - No history charts, metric selectors or cost/time columns are rendered.
 - Core collectors raise structured errors; only the CLI prints its error messages.

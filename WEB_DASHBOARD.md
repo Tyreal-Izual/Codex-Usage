@@ -44,13 +44,13 @@ selection when the server restarts. Explicit `--sources` selections determine in
 工具栏保留 Report／语言／自动刷新／刷新，并加入默认勾选的 Isambard Status 和 Codex Radar。
 Local Days 与 Refresh Seconds 仅通过本地启动参数调整。关闭来源不会删除缓存。
 
-Radar displays only **RadarBench total score cards**, grouped by model. Each
-card shows a one-decimal score and a thin bar scaled to **score / 150**. History
+Radar displays only **homepage degradation score cards**, grouped by model. Each
+card shows a two-decimal score and a thin bar scaled to **score / 150**. History
 charts, model/metric selectors, costs and duration are omitted. Missing scores
-are shown as `—`, distinct from `0.0`. Only RadarBench snapshots can be fallback.
+are shown as `—`, distinct from `0.00`. Only snapshots from the current degradation assessment can be fallback; older RadarBench scores are excluded.
 
-Radar 仅展示新版**总雷达分卡片**：按模型分行，分数保留一位小数，细条按分数 ÷ 150
-显示。移除历史曲线、模型/指标选择器和费用耗时。缺失分数以 `—` 表示，与 `0.0` 区分。
+Radar 仅展示官网当前**降智雷达总分卡片**：按模型分行，分数保留两位小数，细条按分数 ÷ 150
+显示。移除历史曲线、模型/指标选择器和费用耗时。缺失分数以 `—` 表示，与 `0.00` 区分。
 只使用有效新版快照回退；更新代码后需重启网页服务。
 
 ## Refresh behavior / 刷新行为
@@ -67,7 +67,7 @@ renders a late response for the old selection.
 | Claude | 15-second source cache; unchanged JSONL files reuse parsed metadata |
 | Optional Admin API | 60-second source cache |
 | Isambard | 30-second source cache over a 5-minute disk cache |
-| Radar | Independent 4-hour worker, only started when enabled |
+| Radar | Independent 4-hour worker; one homepage request, up to 3 attempts for transient errors |
 
 网页同时最多加载两个区块，逐块显示结果。刷新间隔控制读取频率，各来源仍使用自己的缓存。
 手动刷新仅对 Isambard 绕过缓存，30 秒内最多启动一次；不会强制刷新 Radar 或 Claude 限额。

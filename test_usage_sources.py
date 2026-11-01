@@ -155,6 +155,7 @@ class LegacyCacheTest(unittest.TestCase):
             with patch.object(codex_radar, 'DEFAULT_CACHE_PATH', target), patch.object(codex_radar, 'LEGACY_CACHE_PATH', legacy):
                 service = codex_radar.RadarService(target, clock=lambda:1000)
                 custom = codex_radar.RadarService(Path(directory)/'custom.json', clock=lambda:1000)
-            self.assertEqual(service._state['failures'], 2)
+            self.assertEqual(service._state['schema_version'], 3)
+            self.assertEqual(service._state['failures'], 0)  # New source starts a fresh retry sequence.
             self.assertNotIn('failures', custom._state)
             self.assertFalse(target.exists())

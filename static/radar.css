@@ -3,7 +3,6 @@
     .radar-scores { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; }
     .radar-score { grid-column: var(--score-column); min-width: 0; padding: 11px 12px; border: 1px solid var(--line); border-top: 2px solid var(--series-color); background: linear-gradient(160deg, rgba(255,255,255,.035), transparent), var(--field); color: var(--ink); text-align: left; border-radius: 12px; font-variant-numeric: tabular-nums; }
     .radar-score-heading { display: flex; align-items: center; justify-content: space-between; gap: 6px; color: var(--muted); font: 600 12px ui-monospace, monospace; }
-    .radar-count { border: 1px solid var(--line); border-radius: 5px; padding: 2px 5px; font-size: 11px; white-space: nowrap; }
     .radar-score strong { display: block; margin: 6px 0 7px; font: 800 28px ui-monospace, monospace; color: var(--series-color); }
     .radar-score small { display: block; margin-top: 8px; color: var(--muted); font-size: 11px; }
     .radar-score:hover { border-color: var(--series-color); }

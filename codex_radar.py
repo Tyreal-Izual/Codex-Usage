@@ -2,7 +2,7 @@
 """Codex Radar collector, four-hour cache worker, and standalone dashboard widget.
 
 Only public benchmark metadata is requested. No account or transcript data is
-sent. The RadarBench integration follows https://codexradar.com/ (2026-10-17).
+sent. The degradation radar integration follows https://codexradar.com/ (2026-10-31).
 Run this file directly to update the cache once; the web server owns the worker.
 """
 
@@ -12,12 +12,15 @@ import argparse
 import copy
 import json
 import math
+import re
+import ssl
+from html.parser import HTMLParser
+from urllib.error import HTTPError, URLError
 import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
-from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from dashboard_assets import asset_text
@@ -27,7 +30,7 @@ SOURCE_URL = "https://codexradar.com/"
 METRICS_URL = SOURCE_URL + "api/intelligence-efficiency-metrics"
 VISUAL_URL = SOURCE_URL + "api/visual-spatial-reasoning"
 COVERAGE_URL = SOURCE_URL + "api/intelligence-efficiency-coverage"
-CACHE_VERSION = 5
+CACHE_VERSION = 6
 REFRESH_SECONDS = 4 * 60 * 60
 RETRY_SECONDS = 15 * 60
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
@@ -393,6 +396,164 @@ def bench_snapshot(binding: dict[str, Any], summaries: list[dict[str, Any]]) -> 
             "points": points}
 
 
+DEGRADATION_KIND = "codex-four-task-degradation-150"
+DEGRADATION_MODELS = {
+    "gpt-6.1-sol": "GPT-6.1 Sol", "gpt-6-astra": "GPT-6 Astra",
+    "gpt-6.1-terra": "GPT-6.1 Terra", "gpt-6-sol": "GPT-6 Sol",
+    "gpt-6-luna": "GPT-6 Luna", "gpt-5.6-sol": "GPT-5.6 Sol",
+    "gpt-5.6-terra": "GPT-5.6 Terra", "gpt-5.6-luna": "GPT-5.6 Luna",
+}
+DEGRADATION_EFFORTS = {m: EFFORTS[:-1] if "luna" in m else EFFORTS for m in DEGRADATION_MODELS}
+REQUEST_TIMEOUT = 20
+REQUEST_RETRY_DELAYS = (1, 3)
+
+
+class DegradationPage(HTMLParser):
+    """Read only the published total-score panel, never scripts or artwork."""
+    VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"}
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.stack = []
+        self.rows = []
+        self.period = []
+        self.meta = []
+        self.caption = []
+        self.roots = self.panels = 0
+
+    def handle_starttag(self, tag, attrs):
+        attributes = dict(attrs)
+        parent = self.stack[-1][1] if self.stack else {}
+        frame = dict(parent)
+        if tag == "section" and attributes.get("id") == "stationmaster-round" and "data-intelligence-ui" in attributes:
+            self.roots += 1
+            frame["root"] = True
+        if frame.get("root"):
+            classes = attributes.get("class", "").split()
+            if "cir-test-time" in classes:
+                frame["text"] = self.period
+            elif "cir-meta" in classes:
+                frame["text"] = self.meta
+            if attributes.get("data-cir-panel") == "total":
+                self.panels += 1
+                frame["panel"] = True
+            elif "data-cir-panel" in attributes:
+                frame["panel"] = False
+            if frame.get("panel"):
+                if tag == "caption":
+                    frame["text"] = self.caption
+                if tag == "button" and "data-cir-setting" in attributes:
+                    if frame.get("row") is not None:
+                        raise ValueError("Nested Radar score button")
+                    row = {"key": attributes["data-cir-setting"], "texts": [], "strong_count": 0}
+                    self.rows.append(row)
+                    frame["row"] = row
+                if tag == "strong" and frame.get("row") is not None:
+                    frame["row"]["strong_count"] += 1
+                    frame["text"] = frame["row"]["texts"]
+        if tag not in self.VOID:
+            self.stack.append((tag, frame))
+
+    def handle_startendtag(self, tag, attrs):
+        self.handle_starttag(tag, attrs)
+        if tag not in self.VOID:
+            self.handle_endtag(tag)
+
+    def handle_endtag(self, tag):
+        for index in range(len(self.stack) - 1, -1, -1):
+            if self.stack[index][0] == tag:
+                del self.stack[index:]
+                return
+
+    def handle_data(self, data):
+        if self.stack and "text" in self.stack[-1][1]:
+            self.stack[-1][1]["text"].append(data)
+
+
+def degradation_snapshot(html: str) -> dict[str, Any]:
+    parser = DegradationPage()
+    parser.feed(html)
+    parser.close()
+    if parser.stack or parser.roots != 1 or parser.panels != 1:
+        raise ValueError("Missing, duplicate or truncated degradation score panel")
+    meta = "".join(parser.meta)
+    if not re.fullmatch(r"\s*4\s*个分项\s*·\s*46\s*档\s*·\s*总分\s*150\s*", meta):
+        raise ValueError("Degradation task set or score scale changed")
+    if not re.search(r"总分\s*/\s*150", "".join(parser.caption)):
+        raise ValueError("Degradation total-score scale is missing")
+    period = " ".join("".join(parser.period).split())
+    match = re.fullmatch(r"本轮测试[：:]\s*(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})[–—-](\d{2}:\d{2})[（(]北京时间[）)]", period)
+    if not match:
+        raise ValueError("Degradation test period is missing or unsupported")
+    start = source_time(f"{match[1]}T{match[2]}:00+08:00")
+    end = source_time(f"{match[1]}T{match[3]}:00+08:00")
+    if end < start:
+        raise ValueError("Degradation test period is reversed")
+    expected = {(m, e) for m, efforts in DEGRADATION_EFFORTS.items() for e in efforts}
+    scores = {}
+    for row in parser.rows:
+        parts = row["key"].split(":")
+        key = tuple(parts)
+        if len(parts) != 2 or key not in expected or key in scores or row["strong_count"] != 1:
+            raise ValueError("Invalid or duplicate degradation configuration")
+        value = "".join(row["texts"]).strip()
+        if value in {"—", "–", "-"}:
+            score = None
+        else:
+            if not re.fullmatch(r"\d+(?:\.\d+)?", value):
+                raise ValueError("Invalid degradation score text")
+            score = float(value)
+            if not math.isfinite(score) or not 0 <= score <= 150:
+                raise ValueError("Degradation score outside 0–150")
+        scores[key] = score
+    if set(scores) != expected:
+        raise ValueError("Incomplete degradation model catalog")
+    return {"benchmark_kind": DEGRADATION_KIND, "source_url": SOURCE_URL + "#stationmaster-round",
+            "source_started_at": start.isoformat(), "source_updated_at": end.isoformat(),
+            "points": [{"model": m, "effort": e, "score": scores[m, e]}
+                       for m, efforts in DEGRADATION_EFFORTS.items() for e in efforts]}
+
+
+def validate_degradation_snapshot(value: Any) -> bool:
+    try:
+        if (set(value) != {"benchmark_kind", "source_url", "source_started_at", "source_updated_at", "points"}
+                or value["benchmark_kind"] != DEGRADATION_KIND
+                or value["source_url"] != SOURCE_URL + "#stationmaster-round"
+                or source_time(value["source_updated_at"]) < source_time(value["source_started_at"])):
+            return False
+        expected = [(m, e) for m, efforts in DEGRADATION_EFFORTS.items() for e in efforts]
+        if len(value["points"]) != len(expected):
+            return False
+        for point, key in zip(value["points"], expected):
+            if set(point) != {"model", "effort", "score"} or (point["model"], point["effort"]) != key:
+                return False
+            if point["score"] is not None:
+                score = finite_number(point["score"])
+                if score is None or not 0 <= score <= 150:
+                    return False
+        json.dumps(value, allow_nan=False)
+        return True
+    except (KeyError, TypeError, ValueError, AttributeError):
+        return False
+
+
+def fetch_degradation(url: str) -> dict[str, Any]:
+    request = Request(url, headers={"User-Agent": "Codex-Usage-Dashboard/1.0", "Accept": "text/html"})
+    with urlopen(request, timeout=REQUEST_TIMEOUT, context=ssl_context()) as response:
+        raw = response.read(MAX_RESPONSE_BYTES + 1)
+    if len(raw) > MAX_RESPONSE_BYTES:
+        raise ValueError("Radar page exceeds the size limit")
+    return degradation_snapshot(raw.decode("utf-8"))
+
+
+def transient_request_error(error: Exception) -> bool:
+    if isinstance(error, HTTPError):
+        return error.code in {502, 503, 504}
+    if isinstance(error, URLError):
+        return not isinstance(error.reason, ssl.SSLError) and isinstance(error.reason, (OSError, TimeoutError))
+    return isinstance(error, (TimeoutError, ConnectionError)) and not isinstance(error, ssl.SSLError)
+
+
 def validate_snapshot(snapshot: Any, *, legacy: bool = False) -> bool:
     try:
         if snapshot.get("benchmark_kind") == BENCH_VERSION:
@@ -462,7 +623,7 @@ class RadarService:
     """A nonblocking cache reader with one bounded, server-owned refresh worker."""
 
     def __init__(self, cache_path: Path = DEFAULT_CACHE_PATH, *,
-                 fetcher: Callable[[str], dict[str, Any]] = fetch_json,
+                 fetcher: Callable[[str], dict[str, Any]] = fetch_degradation,
                  clock: Callable[[], float] = time.time) -> None:
         self.cache_path = Path(cache_path)
         self._fetcher = fetcher
@@ -486,23 +647,25 @@ class RadarService:
             # correctly rejects them. Reject corrupt metadata here as well, so
             # retaining a failed attempt cannot crash the background worker.
             json.dumps(state, allow_nan=False)
-            if isinstance(state, dict) and state.get("schema_version") in (1, 2, 3, 4, CACHE_VERSION):
+            if isinstance(state, dict) and state.get("schema_version") in (1, 2, 3, 4, 5, CACHE_VERSION):
                 snapshot = state.get("snapshot")
                 if snapshot is not None and (not isinstance(snapshot, dict)
-                                             or snapshot.get("benchmark_kind") != BENCH_VERSION):
-                    # An old IQ snapshot is not a fallback for the current benchmark.
+                                             or snapshot.get("benchmark_kind") != DEGRADATION_KIND):
+                    # Earlier IQ and RadarBench results cannot be relabelled as degradation scores.
                     for field in ("snapshot", "fetched_at_epoch", "legacy_snapshot"):
                         state.pop(field, None)
                     state["next_attempt_at_epoch"] = now
+                    state["failures"] = 0
                     snapshot = None
                 fetched = finite_number(state.get("fetched_at_epoch"))
-                if snapshot is None or (validate_snapshot(snapshot, legacy=state["schema_version"] == 1 or state.get("legacy_snapshot") is True) and fetched is not None and 0 < fetched <= now + 60):
+                if snapshot is None or (validate_degradation_snapshot(snapshot) and fetched is not None and 0 < fetched <= now + 60):
                     self._state = state
                     if snapshot is None:
                         self._state.pop("fetched_at_epoch", None)
         except (OSError, ValueError):
             pass
-        if self._state.get("schema_version") in (1, 2, 3, 4):
+        if self._state.get("schema_version") in (1, 2, 3, 4, 5):
+            self._state["failures"] = 0
             self._state["next_attempt_at_epoch"] = now
             self._state["last_error"] = "Updating the Radar snapshot to the current model catalog and benchmark rules."
         # An invalid timestamp must never postpone initial recovery indefinitely.
@@ -544,18 +707,12 @@ class RadarService:
                 previous = copy.deepcopy(self._state)
                 self._refreshing = True
             try:
-                binding = bench_binding(self._fetcher(BINDING_URL))
-                summaries = []
-                for selection in binding["model_efforts"]:
-                    if self._stop.is_set() or not self._enabled.is_set():
-                        raise RuntimeError("Radar refresh stopped")
-                    url = BENCH_URL + "?" + urlencode({**selection, "view": "summary", "selection": "user-selected-v1"})
-                    summary = self._fetcher(url)
-                    bench_point(summary, binding, selection)
-                    summaries.append(summary)
-                data = bench_snapshot(binding, summaries)
-                if not validate_snapshot(data):
-                    raise ValueError("Invalid RadarBench snapshot")
+                data = self._fetch_with_retry()
+                if not validate_degradation_snapshot(data):
+                    raise ValueError("Invalid degradation radar snapshot")
+                prior_data = previous.get("snapshot")
+                if prior_data and source_time(data["source_updated_at"]) < source_time(prior_data["source_updated_at"]):
+                    raise ValueError("Radar page is older than the last successful snapshot")
                 finished = self._clock()
                 state = {"snapshot": data, "fetched_at_epoch": finished,
                          "failures": 0, "next_attempt_at_epoch": finished + REFRESH_SECONDS}
@@ -566,9 +723,6 @@ class RadarService:
                 state = {**previous, "failures": failures,
                          "last_error": f"{type(exc).__name__}: {exc}"[:300],
                          "next_attempt_at_epoch": self._clock() + delay}
-            if (state.get("snapshot") is not None and "views" not in state["snapshot"]
-                    and state["snapshot"].get("benchmark_kind") != BENCH_VERSION):
-                state["legacy_snapshot"] = True
             state.update(schema_version=CACHE_VERSION, last_attempt_at_epoch=now)
             state.pop("cache_warning", None)
             try:
@@ -582,6 +736,22 @@ class RadarService:
             with self._lock:
                 self._refreshing = False
             self._refresh_lock.release()
+
+    def _fetch_with_retry(self) -> dict[str, Any]:
+        for attempt in range(len(REQUEST_RETRY_DELAYS) + 1):
+            if self._stop.is_set() or not self._enabled.is_set():
+                raise RuntimeError("Radar refresh stopped")
+            try:
+                return self._fetcher(SOURCE_URL)
+            except Exception as exc:
+                if isinstance(exc, HTTPError):
+                    exc.close()
+                if not transient_request_error(exc) or attempt == len(REQUEST_RETRY_DELAYS):
+                    raise
+                # Stop/pause wakes retry waits; never launches another request while disabled.
+                self._wake.wait(REQUEST_RETRY_DELAYS[attempt])
+                self._wake.clear()
+        raise RuntimeError("Radar retry limit exceeded")
 
     def start(self) -> None:
         if self._thread is not None:
@@ -618,7 +788,7 @@ SCRIPT = asset_text("static/radar.js")
 
 
 # Keep the score renderer model/effort catalog aligned with collection.
-SCRIPT = SCRIPT.replace("__RADAR_BENCH_EFFORTS__", json.dumps(BENCH_EFFORTS))
+SCRIPT = SCRIPT.replace("__RADAR_BENCH_EFFORTS__", json.dumps(DEGRADATION_EFFORTS))
 
 
 def main() -> None:
