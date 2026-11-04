@@ -9,8 +9,12 @@ works when Radar is the only enabled source.
 
 ## Current source and display
 
+On the source site, open **模型智商 (Model intelligence)** → **降智雷达**.
+This is a homepage tab, not a separate data URL; the totals remain in the initial
+HTML, so collection does not require browser navigation or JavaScript.
+
 The integration follows the [homepage degradation radar](https://codexradar.com/#stationmaster-round)
-as verified on **2026-10-31**. This assessment uses Qin Shi Huang, Pompeii, Pelican
+as verified on **2026-11-04**. This assessment uses Qin Shi Huang, Pompeii, Pelican
 and Candy. It is separate from the previous 64-task RadarBench; scores from those
 benchmarks are never mixed or used as fallback for this one.
 
@@ -26,8 +30,7 @@ benchmarks are never mixed or used as fallback for this one.
   `—` with a dashed placeholder. Cost, duration, historical curves and the old
   RadarBench coverage/record counts are not shown.
 - The title age measures time since the last successful **local sync**. The source
-  test period is shown separately: the homepage publishes its start/end to the
-  minute in Beijing time, which the dashboard displays in the browser's timezone.
+  test period is shown separately: the homepage publishes its start/end in Beijing time (minutes or seconds), which the dashboard displays in the browser's timezone.
   A successful sync does not mean the source ran a new test round.
 
 ## Refresh and failure handling
@@ -45,6 +48,8 @@ After all attempts fail, the last successful degradation snapshot remains visibl
 with its original sync time. Scheduled retries back off for 15, 30, 60, 120, then
 at most 240 minutes, and their deadline survives restart.
 
+Additional grading-progress notices are kept separate from the score-scale heading.
+An intentionally unscored configuration remains `—`, not zero.
 All 46 configurations, the four-component/150-point heading, the source test period,
 and score ranges must pass validation before replacing the cache. A partial page,
 changed catalog or older test period leaves the last valid snapshot intact. Source

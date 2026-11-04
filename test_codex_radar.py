@@ -105,6 +105,27 @@ class DegradationTest(unittest.TestCase):
                 self.assertTrue(radar.validate_degradation_snapshot(snapshot))
                 self.assertEqual(snapshot['points'][0]['score'], expected)
 
+    def test_progress_notice_seconds_and_unscored_configuration_are_supported(self):
+        source = degradation_html().replace(
+            '本轮测试：2026-10-31 13:31–16:53（北京时间）',
+            '本轮测试：2026-11-04 09:24:08–11:53:41（北京时间）')
+        source = source.replace('<div data-cir-panel="total">',
+            '<p class="cir-meta">183/184 项已判 · 45档有总分 · 1项按要求停测</p><div data-cir-panel="total">')
+        source = source.replace(
+            'data-cir-setting="gpt-5.6-terra:ultra"><span><strong>107.3</strong>',
+            'data-cir-setting="gpt-5.6-terra:ultra"><span><strong>—</strong>')
+        snapshot = radar.degradation_snapshot(source)
+        self.assertTrue(radar.validate_degradation_snapshot(snapshot))
+        self.assertEqual(snapshot['source_started_at'], '2026-11-04T01:24:08+00:00')
+        self.assertEqual(snapshot['source_updated_at'], '2026-11-04T03:53:41+00:00')
+        self.assertEqual(len(snapshot['points']), 46)
+        missing = [p for p in snapshot['points'] if p['score'] is None]
+        self.assertEqual(missing, [{'model':'gpt-5.6-terra', 'effort':'ultra', 'score':None}])
+        duplicate = source.replace('183/184 项已判 · 45档有总分 · 1项按要求停测', '4 个分项 · 46 档 · 总分150')
+        with self.assertRaises(ValueError): radar.degradation_snapshot(duplicate)
+        with self.assertRaises(ValueError):
+            radar.degradation_snapshot(source.replace('11:53:41', '11:53:99'))
+
     def test_changed_incomplete_or_ambiguous_page_is_rejected(self):
         html = degradation_html()
         cases = [html.replace('总分150','总分100'), html.replace('4 个分项','5 个分项'),
@@ -587,6 +608,24 @@ class ServiceTest(unittest.TestCase):
                 self.error = None
                 self.assertTrue(restarted.refresh_if_due())
                 self.assertEqual(restarted.snapshot()['data']['benchmark_kind'], radar.DEGRADATION_KIND)
+
+    def test_parser_upgrade_refreshes_immediately_and_retains_current_scores(self):
+        snapshot = degradation_fixture()
+        self.path.write_text(json.dumps({'schema_version':6, 'snapshot':snapshot,
+            'fetched_at_epoch':self.now, 'next_attempt_at_epoch':self.now+radar.REFRESH_SECONDS, 'failures':5}))
+        upgraded = radar.RadarService(self.path, clock=lambda:self.now, fetcher=self.fetch)
+        self.assertEqual(upgraded.snapshot()['data'], snapshot)
+        self.error = ValueError('invalid response')
+        self.assertFalse(upgraded.refresh_if_due())
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(upgraded.snapshot()['data'], snapshot)
+        restarted = radar.RadarService(self.path, clock=lambda:self.now, fetcher=self.fetch)
+        self.assertFalse(restarted.refresh_if_due())
+        self.assertEqual(len(self.calls), 1)
+        self.now += radar.RETRY_SECONDS
+        self.error = None
+        self.assertTrue(restarted.refresh_if_due())
+        self.assertFalse(restarted.snapshot()['stale'])
 
     def test_older_test_round_never_replaces_latest_snapshot(self):
         self.service.refresh_if_due()

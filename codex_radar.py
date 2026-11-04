@@ -2,7 +2,7 @@
 """Codex Radar collector, four-hour cache worker, and standalone dashboard widget.
 
 Only public benchmark metadata is requested. No account or transcript data is
-sent. The degradation radar integration follows https://codexradar.com/ (2026-10-31).
+sent. The degradation radar integration follows https://codexradar.com/ (2026-11-04).
 Run this file directly to update the cache once; the web server owns the worker.
 """
 
@@ -30,7 +30,7 @@ SOURCE_URL = "https://codexradar.com/"
 METRICS_URL = SOURCE_URL + "api/intelligence-efficiency-metrics"
 VISUAL_URL = SOURCE_URL + "api/visual-spatial-reasoning"
 COVERAGE_URL = SOURCE_URL + "api/intelligence-efficiency-coverage"
-CACHE_VERSION = 6
+CACHE_VERSION = 7
 REFRESH_SECONDS = 4 * 60 * 60
 RETRY_SECONDS = 15 * 60
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
@@ -433,7 +433,10 @@ class DegradationPage(HTMLParser):
             if "cir-test-time" in classes:
                 frame["text"] = self.period
             elif "cir-meta" in classes:
-                frame["text"] = self.meta
+                # The site also uses cir-meta for grading-progress notices.
+                # Keep each block separate from the task-count/score-scale heading.
+                frame["text"] = []
+                self.meta.append(frame["text"])
             if attributes.get("data-cir-panel") == "total":
                 self.panels += 1
                 frame["panel"] = True
@@ -476,17 +479,18 @@ def degradation_snapshot(html: str) -> dict[str, Any]:
     parser.close()
     if parser.stack or parser.roots != 1 or parser.panels != 1:
         raise ValueError("Missing, duplicate or truncated degradation score panel")
-    meta = "".join(parser.meta)
-    if not re.fullmatch(r"\s*4\s*个分项\s*·\s*46\s*档\s*·\s*总分\s*150\s*", meta):
+    headings = [block for block in parser.meta if re.fullmatch(
+        r"\s*4\s*个分项\s*·\s*46\s*档\s*·\s*总分\s*150\s*", "".join(block))]
+    if len(headings) != 1:
         raise ValueError("Degradation task set or score scale changed")
     if not re.search(r"总分\s*/\s*150", "".join(parser.caption)):
         raise ValueError("Degradation total-score scale is missing")
     period = " ".join("".join(parser.period).split())
-    match = re.fullmatch(r"本轮测试[：:]\s*(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})[–—-](\d{2}:\d{2})[（(]北京时间[）)]", period)
+    match = re.fullmatch(r"本轮测试[：:]\s*(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}(?::\d{2})?)[–—-](\d{2}:\d{2}(?::\d{2})?)[（(]北京时间[）)]", period)
     if not match:
         raise ValueError("Degradation test period is missing or unsupported")
-    start = source_time(f"{match[1]}T{match[2]}:00+08:00")
-    end = source_time(f"{match[1]}T{match[3]}:00+08:00")
+    start = source_time(f"{match[1]}T{match[2]}+08:00")
+    end = source_time(f"{match[1]}T{match[3]}+08:00")
     if end < start:
         raise ValueError("Degradation test period is reversed")
     expected = {(m, e) for m, efforts in DEGRADATION_EFFORTS.items() for e in efforts}
@@ -647,7 +651,7 @@ class RadarService:
             # correctly rejects them. Reject corrupt metadata here as well, so
             # retaining a failed attempt cannot crash the background worker.
             json.dumps(state, allow_nan=False)
-            if isinstance(state, dict) and state.get("schema_version") in (1, 2, 3, 4, 5, CACHE_VERSION):
+            if isinstance(state, dict) and state.get("schema_version") in (1, 2, 3, 4, 5, 6, CACHE_VERSION):
                 snapshot = state.get("snapshot")
                 if snapshot is not None and (not isinstance(snapshot, dict)
                                              or snapshot.get("benchmark_kind") != DEGRADATION_KIND):
@@ -664,7 +668,7 @@ class RadarService:
                         self._state.pop("fetched_at_epoch", None)
         except (OSError, ValueError):
             pass
-        if self._state.get("schema_version") in (1, 2, 3, 4, 5):
+        if self._state.get("schema_version") in (1, 2, 3, 4, 5, 6):
             self._state["failures"] = 0
             self._state["next_attempt_at_epoch"] = now
             self._state["last_error"] = "Updating the Radar snapshot to the current model catalog and benchmark rules."
