@@ -1,25 +1,21 @@
 # Privacy and limitations
 
-[Quick start](../README.md)
+[Quick start](../README.md) · [中文快速开始](../README.zh-CN.md)
 
-- The server listens on `127.0.0.1` by default.
-- Codex and Claude transcript/state files are read but not modified; the Claude
-  bridges write only the sanitised usage snapshot and refresher support files.
-- Claude streaming rows are deduplicated before token totals are calculated.
-- The Claude statusLine bridge never reads or reuses Claude OAuth credentials.
-- The optional refresher runs the normal Claude Code client and may perform its
-  usual startup network requests or configured hooks, but sends no prompt and
-  does not resume a conversation or save its terminal output.
-- Codex reset-credit and online-profile requests are read-only.
-- OpenAI Admin API access is optional and uses documented endpoints.
-- Isambard data comes from public status pages; only parsed cache data is kept.
-- Radar requests only public benchmark metadata, sends no local account or
-  conversation data, and stores its snapshot in a Git-ignored cache file.
-- Individual collectors fail independently so one unavailable source does not
-  take down the whole dashboard.
+- The native app talks to its Python helper over private pipes and opens no HTTP port.
+- Local Codex/Claude files are read for usage metadata; conversation contents are not
+  displayed/exported, and transcripts are not modified. Exports may contain local paths.
+- Codex online queries reuse the local signed-in account for read-only requests.
+  Subscription endpoints are unofficial and may change; Admin API access is optional.
+- Claude capture writes sanitized limit snapshots and its own configuration/support
+  files. The optional refresher runs the normal CLI and `/usage` without a prompt;
+  client startup may run configured hooks or network requests.
+- Radar/Isambard fetch public pages without sending account or transcript data.
+  HTTPS always verifies certificates and hostnames using the configured CA roots.
+- Demo mode uses synthetic data. Setup checks do not read credentials; optional
+  HTTPS diagnostics contact public endpoints without account credentials.
+- The [legacy web server](../WEB_DASHBOARD.md) retains its loopback default and authentication.
 
-Some Codex subscription endpoints used by the upstream-derived collector are
-undocumented and may change. Treat all displayed values as operational
-information rather than a contractual billing statement. Do not commit API
-keys, `auth.json`, private exports, cached account data, or sensitive
-screenshots.
+Review exports before sharing, and keep credentials, private caches and account
+screenshots out of Git. See [data boundaries](development.md#data-boundaries)
+for accuracy boundaries; displayed values are operational information, not billing statements.

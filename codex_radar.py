@@ -786,13 +786,14 @@ class RadarService:
             self._thread.join(timeout=1)
 
 
-STYLE = asset_text("static/radar.css")
-
-SCRIPT = asset_text("static/radar.js")
-
-
-# Keep the score renderer model/effort catalog aligned with collection.
-SCRIPT = SCRIPT.replace("__RADAR_BENCH_EFFORTS__", json.dumps(DEGRADATION_EFFORTS))
+def __getattr__(name: str) -> str:
+    # The native collector does not load or bundle the legacy web assets.
+    if name == "STYLE":
+        return asset_text("static/radar.css")
+    if name == "SCRIPT":
+        return asset_text("static/radar.js").replace(
+            "__RADAR_BENCH_EFFORTS__", json.dumps(DEGRADATION_EFFORTS))
+    raise AttributeError(name)
 
 
 def main() -> None:

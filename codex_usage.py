@@ -19,7 +19,7 @@ or secrets.
 
 from __future__ import annotations
 
-from usage_common import CollectionError, export_directory
+from usage_common import CollectionError, export_directory, ssl_context
 import threading
 import argparse
 import contextlib
@@ -446,7 +446,7 @@ def fetch_json(
         },
     )
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as response:
+        with urllib.request.urlopen(req, timeout=timeout, context=ssl_context()) as response:
             raw = response.read().decode("utf-8", "replace")
             status = response.status
     except urllib.error.HTTPError as exc:
@@ -498,7 +498,7 @@ def fetch_admin_json(
         },
     )
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as response:
+        with urllib.request.urlopen(req, timeout=timeout, context=ssl_context()) as response:
             raw = response.read().decode("utf-8", "replace")
             status = response.status
     except urllib.error.HTTPError as exc:
@@ -3199,7 +3199,7 @@ def build_parser() -> argparse.ArgumentParser:
     api_usage.set_defaults(func=cmd_api_usage)
 
     export = subparsers.add_parser(
-        "export", help="Export a report next to this script as TXT, JSON, or CSV."
+        "export", help="Export a report as TXT, JSON, or CSV."
     )
     add_common(export)
     export.add_argument(

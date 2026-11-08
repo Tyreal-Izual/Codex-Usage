@@ -26,6 +26,8 @@ def snapshot_path() -> Path:
 
 
 def command_text() -> str:
+    if getattr(sys, "frozen", False):
+        return shlex.quote(sys.executable) + " --statusline"
     return " ".join((shlex.quote(sys.executable), shlex.quote(str(Path(__file__).resolve()))))
 
 
@@ -133,7 +135,10 @@ def load_settings(path: Path) -> dict[str, Any]:
 def is_ours(value: Any) -> bool:
     if not isinstance(value, dict):
         return False
-    return str(Path(__file__).resolve()) in str(value.get("command") or "")
+    command = str(value.get("command") or "")
+    if getattr(sys, "frozen", False):
+        return command_text() in command
+    return str(Path(__file__).resolve()) in command
 
 
 def install(force: bool) -> None:

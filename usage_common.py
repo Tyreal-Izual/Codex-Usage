@@ -60,6 +60,7 @@ def atomic_write_json(path: Path, payload: Any) -> None:
 
 
 def ssl_context() -> ssl.SSLContext:
+    """Use explicit CA roots: bundled OpenSSL may reference a missing build-host path."""
     configured = os.environ.get("SSL_CERT_FILE")
     if configured:
         return ssl.create_default_context(cafile=configured)
@@ -68,6 +69,35 @@ def ssl_context() -> ssl.SSLContext:
         if Path(bundle).is_file():
             return ssl.create_default_context(cafile=bundle)
     return ssl.create_default_context()
+
+
+def tls_diagnostics(*, probe: bool = False) -> dict[str, Any]:
+    """Inspect trust configuration; optional public HEAD requests send no account data."""
+    context = ssl_context()
+    result: dict[str, Any] = {
+        "ca_certificates": context.cert_store_stats()["x509_ca"],
+        "certificate_verification": context.verify_mode == ssl.CERT_REQUIRED,
+        "hostname_verification": context.check_hostname,
+    }
+    if probe:
+        from urllib.error import HTTPError, URLError
+        from urllib.request import Request, urlopen
+        checks = []
+        for url in ("https://chatgpt.com/", "https://api.openai.com/"):
+            try:
+                with urlopen(Request(url, method="HEAD"), context=context, timeout=15) as response:
+                    checks.append({"url": url, "tls_verified": True, "http_status": response.status})
+            except HTTPError as error:
+                # An HTTP error (e.g. an unauthenticated 403) still proves TLS succeeded.
+                checks.append({"url": url, "tls_verified": True, "http_status": error.code})
+                error.close()
+            except (URLError, OSError) as error:
+                checks.append({"url": url, "tls_verified": False, "error": str(error)})
+        result["probes"] = checks
+    result["ok"] = bool(result["ca_certificates"] and result["certificate_verification"]
+                        and result["hostname_verification"]
+                        and all(check["tls_verified"] for check in result.get("probes", [])))
+    return result
 
 
 def find_claude_binary(explicit: Path | None = None) -> Path | None:

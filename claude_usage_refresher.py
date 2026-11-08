@@ -689,9 +689,8 @@ def install_launch_agent(
     logs.mkdir(parents=True, exist_ok=True)
     script = Path(__file__).resolve()
     python = Path(sys.executable).resolve()
-    arguments = [
-        str(python),
-        str(script),
+    arguments = ([str(python), "--refresh-claude"] if getattr(sys, "frozen", False)
+                 else [str(python), str(script)]) + [
         "--once",
         "--quiet",
         "--project-dir",

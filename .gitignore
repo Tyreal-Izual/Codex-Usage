@@ -10,3 +10,7 @@ codex_*_report_*.json
 codex_*_report_*.csv
 codex_*_report_*.txt
 exports/
+.build/
+dist/
+macOS/.build/
+.swiftpm/

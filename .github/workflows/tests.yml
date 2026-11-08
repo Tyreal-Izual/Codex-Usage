@@ -29,3 +29,24 @@ jobs:
           suite = unittest.defaultTestLoader.discover('.')
           result = unittest.TextTestRunner(verbosity=2).run(suite)
           sys.exit(0 if result.wasSuccessful() and not result.skipped else 1)
+  native:
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.10', '3.14']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Native app and pipe integration tests
+        run: swift test --package-path macOS
+        env:
+          USAGE_PYTHON: ${{ env.pythonLocation }}/bin/python3
+      - name: Build self-contained app
+        if: matrix.python == '3.14'
+        run: ./scripts/build_macos.sh
+      - name: Validate bundled helper
+        if: matrix.python == '3.14'
+        run: python3 scripts/check_bundle.py dist/Usage.app

@@ -131,11 +131,20 @@ def usage_key(
     return "fallback=" + "|".join(signature)
 
 
+def prefer_usage_record(candidate: dict[str, Any], previous: dict[str, Any]) -> bool:
+    """Choose one complete snapshot; never add or mix counters from duplicate rows."""
+    amount, old_amount = candidate["usage"][TOTAL_FIELD], previous["usage"][TOTAL_FIELD]
+    if amount != old_amount:
+        return amount > old_amount
+    date, old_date = parse_timestamp(candidate["timestamp"]), parse_timestamp(previous["timestamp"])
+    return date is not None and (old_date is None or date > old_date)
+
+
 def scan_file(file_path: Path, claude_home: Path) -> dict[str, Any]:
-    records: list[dict[str, Any]] = []
-    seen: set[str] = set()
+    records: dict[str, dict[str, Any]] = {}
     lines_seen = 0
     parse_errors = 0
+    read_failed = False
     usage_rows_seen = 0
     duplicate_rows = 0
 
@@ -162,60 +171,66 @@ def scan_file(file_path: Path, claude_home: Path) -> dict[str, Any]:
                 if usage[TOTAL_FIELD] <= 0:
                     continue
                 key = usage_key(obj, message, usage, file_path)
-                if key in seen:
-                    duplicate_rows += 1
-                    continue
-                seen.add(key)
-
                 timestamp = obj.get("timestamp")
                 cwd = obj.get("cwd") if isinstance(obj.get("cwd"), str) else None
-                records.append(
-                    {
-                        "key": key,
-                        "timestamp": timestamp,
-                        "date": local_date(timestamp),
-                        "model": str(message.get("model") or "unknown"),
-                        "project": short_path(cwd),
-                        "session_id": str(obj.get("sessionId") or file_path.stem),
-                        "session_file": str(file_path.relative_to(claude_home)),
-                        "usage": usage,
-                    }
-                )
+                record = {
+                    "key": key,
+                    "timestamp": timestamp,
+                    "date": local_date(timestamp),
+                    "model": str(message.get("model") or "unknown"),
+                    "project": cwd or "-",
+                    "session_id": str(obj.get("sessionId") or file_path.stem),
+                    "session_file": str(file_path.relative_to(claude_home)),
+                    "usage": usage,
+                }
+                previous = records.get(key)
+                if previous is not None:
+                    duplicate_rows += 1
+                    if not prefer_usage_record(record, previous):
+                        continue
+                records[key] = record
     except OSError:
         parse_errors += 1
+        read_failed = True
 
     return {
-        "records": records,
+        "records": list(records.values()),
         "lines_seen": lines_seen,
         "parse_errors": parse_errors,
+        "read_failed": read_failed,
         "usage_rows_seen": usage_rows_seen,
         "duplicate_rows": duplicate_rows,
     }
 
 
-_FILE_CACHE: dict[str, tuple[tuple[int, int], dict[str, Any]]] = {}
+_FILE_CACHE: dict[str, tuple[tuple[int, int, int, int], dict[str, Any]]] = {}
 _CACHE_LOCK = threading.Lock()
 
 
 def cached_file_scan(file_path: Path, claude_home: Path) -> dict[str, Any]:
+    cache_key = str(file_path)
     try:
         stat = file_path.stat()
-        signature = (stat.st_mtime_ns, stat.st_size)
+        signature = (stat.st_mtime_ns, stat.st_ctime_ns, stat.st_size, stat.st_ino)
     except OSError:
+        _FILE_CACHE.pop(cache_key, None)
         return {
             "records": [],
             "lines_seen": 0,
             "parse_errors": 1,
+            "read_failed": True,
             "usage_rows_seen": 0,
             "duplicate_rows": 0,
         }
 
-    cache_key = str(file_path)
     cached = _FILE_CACHE.get(cache_key)
     if cached and cached[0] == signature:
         return cached[1]
     result = scan_file(file_path, claude_home)
-    _FILE_CACHE[cache_key] = (signature, result)
+    if result["read_failed"]:
+        _FILE_CACHE.pop(cache_key, None)
+    else:
+        _FILE_CACHE[cache_key] = (signature, result)
     return result
 
 
@@ -246,8 +261,7 @@ def aggregate_local_usage(claude_home: Path, top_n: int, days: int) -> dict[str,
     parse_errors = 0
     usage_rows_seen = 0
     duplicate_rows = 0
-    unique_records = 0
-    globally_seen: set[str] = set()
+    unique: dict[str, dict[str, Any]] = {}
     latest_record_at: datetime | None = None
 
     with _CACHE_LOCK:
@@ -261,53 +275,57 @@ def aggregate_local_usage(claude_home: Path, top_n: int, days: int) -> dict[str,
             parse_errors += int(scanned["parse_errors"])
             usage_rows_seen += int(scanned["usage_rows_seen"])
             duplicate_rows += int(scanned["duplicate_rows"])
+            if scanned["read_failed"]:
+                continue
 
             for record in scanned["records"]:
                 key = record["key"]
-                if key in globally_seen:
+                previous = unique.get(key)
+                if previous is not None:
                     duplicate_rows += 1
-                    continue
-                globally_seen.add(key)
-                unique_records += 1
+                    if not prefer_usage_record(record, previous):
+                        continue
+                unique[key] = record
 
-                record_at = parse_timestamp(record.get("timestamp"))
-                if record_at is not None and (
-                    latest_record_at is None or record_at > latest_record_at
-                ):
-                    latest_record_at = record_at
+    for record in unique.values():
+        record_at = parse_timestamp(record.get("timestamp"))
+        if record_at is not None and (
+            latest_record_at is None or record_at > latest_record_at
+        ):
+            latest_record_at = record_at
 
-                usage = record["usage"]
-                day = record["date"]
-                model = record["model"]
-                project = record["project"]
-                session_file = record["session_file"]
+        usage = record["usage"]
+        day = record["date"]
+        model = record["model"]
+        project = record["project"]
+        session_file = record["session_file"]
 
-                add_usage(totals, usage)
-                add_usage(daily[day], usage)
-                daily[day]["requests"] += 1
-                daily_sessions[day].add(session_file)
-                add_usage(model_totals[model], usage)
-                model_requests[model] += 1
-                add_usage(project_totals[project], usage)
-                project_requests[project] += 1
-                add_usage(session_totals[session_file], usage)
-                session_totals[session_file]["requests"] += 1
+        add_usage(totals, usage)
+        add_usage(daily[day], usage)
+        daily[day]["requests"] += 1
+        daily_sessions[day].add(session_file)
+        add_usage(model_totals[model], usage)
+        model_requests[model] += 1
+        add_usage(project_totals[project], usage)
+        project_requests[project] += 1
+        add_usage(session_totals[session_file], usage)
+        session_totals[session_file]["requests"] += 1
 
-                meta = session_meta.setdefault(
-                    session_file,
-                    {
-                        "date": day,
-                        "timestamp": record.get("timestamp"),
-                        "models": set(),
-                        "project": project,
-                        "session_id": record["session_id"],
-                    },
-                )
-                meta["models"].add(model)
-                if str(record.get("timestamp") or "") > str(meta.get("timestamp") or ""):
-                    meta["timestamp"] = record.get("timestamp")
-                    meta["date"] = day
-                    meta["project"] = project
+        meta = session_meta.setdefault(
+            session_file,
+            {
+                "date": day,
+                "timestamp": record.get("timestamp"),
+                "models": set(),
+                "project": project,
+                "session_id": record["session_id"],
+            },
+        )
+        meta["models"].add(model)
+        if str(record.get("timestamp") or "") > str(meta.get("timestamp") or ""):
+            meta["timestamp"] = record.get("timestamp")
+            meta["date"] = day
+            meta["project"] = project
 
     daily_rows: list[dict[str, Any]] = []
     for day in sorted(daily):
@@ -346,7 +364,7 @@ def aggregate_local_usage(claude_home: Path, top_n: int, days: int) -> dict[str,
             {
                 "date": meta["date"],
                 "models": sorted(meta["models"]),
-                "project": meta["project"],
+                "project": short_path(meta["project"]),
                 "session_id": meta["session_id"],
                 "session_file": session_file,
                 "requests": int(counter.get("requests", 0)),
@@ -361,7 +379,7 @@ def aggregate_local_usage(claude_home: Path, top_n: int, days: int) -> dict[str,
         "jsonl_lines_scanned": lines_seen,
         "parse_or_read_errors": parse_errors,
         "usage_rows_seen": usage_rows_seen,
-        "unique_usage_records": unique_records,
+        "unique_usage_records": len(unique),
         "duplicate_usage_records_skipped": duplicate_rows,
         "token_totals": counter_dict(totals),
         "daily_usage": daily_rows,
@@ -393,6 +411,8 @@ def statusline_script_path() -> Path:
 
 
 def statusline_install_command() -> str:
+    if getattr(sys, "frozen", False):
+        return shlex.quote(sys.executable) + " --statusline --install"
     return " ".join(
         [shlex.quote(sys.executable), shlex.quote(str(statusline_script_path())), "--install"]
     )
@@ -408,6 +428,8 @@ def statusline_is_installed(claude_home: Path) -> bool:
     if not isinstance(status_line, dict):
         return False
     command = str(status_line.get("command") or "")
+    if getattr(sys, "frozen", False):
+        return shlex.quote(sys.executable) + " --statusline" in command
     return str(statusline_script_path()) in command
 
 
@@ -576,6 +598,7 @@ def collect_rate_limits(claude_home: Path, snapshot_path: Path) -> dict[str, Any
     base.update(
         {
             "available": bool(five_hour or seven_day),
+            "captured_at_epoch": captured_epoch,
             "captured_at": snapshot.get("captured_at"),
             "captured_at_local": local_timestamp_text(snapshot.get("captured_at")),
             "age_seconds": age,

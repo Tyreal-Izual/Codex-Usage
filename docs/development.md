@@ -1,64 +1,106 @@
-# Development and verification
+# Development and configuration
 
 [Quick start](../README.md) · [中文快速开始](../README.zh-CN.md)
 
-## Repository layout
+## Architecture
 
 | Path | Responsibility |
 | --- | --- |
-| `codex_claude_usage_web.py` | Authenticated HTTP server, report composition and startup options |
-| `codex_usage.py` | Upstream-derived Codex collector, terminal reports and exports |
-| `claude_usage.py` | Claude usage metadata and local limit snapshots |
-| `claude_usage_statusline.py` | Optional limit-capture bridge |
-| `claude_usage_refresher.py` | Optional macOS/POSIX refresh automation |
-| `codex_radar.py`, `isambard_status.py` | Public-source collection and caching |
-| `usage_common.py` | Paths, atomic JSON writes, executable discovery and TLS configuration |
-| `usage_sources.py` | Source selection, independent caches and read-only diagnostics |
-| `dashboard_assets.py` | Load repository-owned templates and assets |
-| `templates/` | Page markup |
-| `static/` | Editable CSS/JavaScript, including progressive loading and Radar |
-| `test_*.py` | Standard-library regression tests |
+| `macOS/Sources/UsageMac/` | SwiftUI scenes, layouts/theme, observable state, limit presentation and helper client |
+| `native_backend.py` | Private JSON-lines dispatcher: request IDs, two workers, eight outstanding reports |
+| `usage_reports.py`, `usage_sources.py`, `usage_common.py` | Report composition, source caches, paths, atomic writes and verified TLS |
+| `codex_usage.py`, `claude_usage.py` | Local/online collectors and token aggregation |
+| `codex_radar.py`, `isambard_status.py` | Public-source collection and disk caches |
+| `claude_usage_statusline.py`, `claude_usage_refresher.py` | Optional Claude snapshot capture and scheduling |
+| `scripts/` | App packaging, icon generation and bundle verification |
+| `codex_claude_usage_web.py`, `static/`, `templates/` | Retained web interface; excluded from the native app's UI resources |
 
-The source files are separated for editing, then assembled into authenticated
-HTML responses at startup. There is no public filesystem route, build step,
-third-party runtime dependency or need to install a package. Restart after edits.
-Keep the checkout together; copying only an entry-point script is insufficient.
+SwiftUI owns a persistent Python helper and communicates over stdin/stdout, with no
+HTTP listener or WebView. Sources return independently; source changes invalidate old
+replies. EOF, process exit and invalid responses close the helper session, fail pending
+requests and expose Reconnect in the toolbar/menu; refresh stays disabled until recovery.
+Intentional shutdown is silent. Radar owns a separate worker. UI preferences persist
+in UserDefaults; source edits during connection are applied before the initial refresh.
 
-## Tests
+## Configuration
+
+| Variable | Purpose / default |
+| --- | --- |
+| `CODEX_HOME` | Codex state: `~/.codex` |
+| `CLAUDE_CONFIG_DIR`, `CLAUDE_BIN` | Claude state (`~/.claude`) and optional executable override |
+| `CLAUDE_USAGE_SNAPSHOT` | Limit snapshot: `~/.claude/usage-dashboard.json` |
+| `CLAUDE_USAGE_STALE_SECONDS` | Snapshot stale threshold: 900 seconds, minimum 60 |
+| `CLAUDE_USAGE_PROJECT_DIR` | Trusted project for the optional refresher |
+| `CODEX_USAGE_CACHE_DIR` | Public caches: `~/Library/Caches/codex-usage` |
+| `CODEX_USAGE_EXPORT_DIR` | CLI exports: `~/Downloads/codex-usage`; App exports use the save dialog |
+| `SSL_CERT_FILE` | Custom CA bundle; otherwise macOS `/etc/ssl/cert.pem` is used |
+| `OPENAI_ADMIN_KEY` | Optional organization usage/cost API; not needed for subscriptions |
+
+Finder does not inherit shell variables. To use a custom environment, launch
+`dist/Usage.app/Contents/MacOS/UsageMac` from that configured shell. Without saved
+preferences, local sources are auto-detected and Isambard/Radar are enabled.
+
+| Source | Cache / refresh |
+| --- | --- |
+| Codex local | 5 seconds; unchanged transcripts reuse parsed metadata |
+| Codex online, Reset Credits, Admin API | 60 seconds |
+| Claude | 15 seconds; limits read the captured snapshot |
+| Isambard | 30 seconds over a five-minute disk cache; manual bypass at most once per 30 seconds |
+| Radar | Independent four-hour worker; [retry and validation rules](radar.md) |
+
+The refresh preference controls polling, not upstream cache expiry. History rows
+limit local daily tables; local totals remain historical. Admin API uses the same
+value as its lookback in days. Limit countdowns and snapshot age update without a
+fetch. Missing values, false and zero stay distinct.
+History-size edits coalesce for 300 ms and refresh only local, Claude and enabled
+Admin reports; they do not reconfigure sources or refresh online/public reports.
+Reset credits prioritize active entries by expiry and highlight those due within
+seven days. Counts remain server-reported; expiry cues follow the Mac's clock.
+Changed limit percentages, model counts/tokens/shares, credit counts/balance and
+Radar scores highlight for four seconds. Initial data and clock ticks do not flash;
+Reduce Motion disables the pulse.
+
+## Build and checks
+
+Quit Usage before rebuilding or starting demo mode. Open `macOS/Package.swift` in
+Xcode; `./scripts/build_macos.sh --development` builds against the checkout's Python.
+Run checks from the checkout root:
 
 ```sh
 python3 -B -m unittest discover -v
-python3 -B -m unittest test_codex_usage test_usage_sources test_dashboard_refresh -v
-python3 -B -m unittest test_codex_radar -v
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun swift test --package-path macOS --scratch-path .build/swift
+./scripts/build_macos.sh
+python3 -B scripts/check_bundle.py dist/Usage.app
+codesign --verify --deep --strict dist/Usage.app
+open dist/Usage.app --args --demo
 ```
 
-Node.js on PATH enables the JavaScript regression tests. Python marks those tests
-skipped when Node is missing. CI installs Node and fails if any test is skipped.
-The suite uses temporary files, synthetic usage/benchmark records, mocked upstream
-responses and ephemeral loopback HTTP servers; it requires no account or network service.
+Development builds require the checkout and selected Python; release builds bundle
+Python. The script selects `/Applications/Xcode.app` when available. Adjust
+`DEVELOPER_DIR` for another Xcode location, or omit it when the selected Command
+Line Tools compiler and SDK already match.
 
-CI exercises Python 3.10 and 3.14 on Linux, macOS and Windows. Platform-specific
-background installation is optional; the dashboard and collectors remain portable.
-Cross-platform CI results only become available after pushing the workflow.
+CI is configured for Python 3.10/3.14 on Linux, macOS and Windows for the shared
+collectors and legacy web/CLI. Swift tests and app packaging run only on macOS. Python tests require
+loopback access and Node; CI rejects skipped tests. TLS tests use a public, untrusted
+fixture certificate without requiring an external OpenSSL executable. Swift tests cover
+process failures, reconnect races, targeted history refresh, exports and presentation.
+The bundle check uses temporary data and no external service by default. Add
+`--https` to check public HTTPS without credentials. Certificate verification stays enabled.
 
-After UI changes also check a narrow browser window, language switching, keyboard
-navigation, loading/failure states and reduced-motion behavior. Automated tests
-cover script syntax, progressive loading, request bounds and selected rendering;
-they do not establish visual correctness on every browser.
+For a built app, `Contents/Resources/helper/usage-helper --check` inspects setup,
+`--check-tls` checks CA loading offline, and `--check-https` probes public endpoints.
+Demo mode reads no account files, starts no helper and saves no preferences.
+UI checks should cover both languages, resizing, keyboard access, source switches,
+export and quit cleanup. Public signing/notarization and automatic updates remain release work.
 
-## Behavior to preserve
+## Data boundaries
 
-- CLI entry points, report keys, API authentication and source privacy boundaries.
-- Cumulative Codex token totals use the final valid record, not the sum of snapshots.
-- Claude duplicate identities are counted once, including across subagent files.
-- File growth, truncation, replacement and deletion invalidate/reconcile caches.
-- A source cache coalesces matching work without blocking unrelated sources.
-- Disabled sources never start new collection work (already-running fetches may finish); `--check` never launches clients.
-- Failed disk writes retain useful live results and clean up temporary files.
-- Homepage degradation totals are read without recomputing component scores; zero and missing remain distinct.
-- Radar refreshes require a complete 46-configuration total panel before replacing the snapshot.
-- Old IQ/RadarBench caches are never displayed; only current degradation snapshots are fallback.
-- Radar cards use a fixed score/150 bar scale in both languages; zero and missing scores differ.
-- Transient network retries are bounded and interruptible; invalid pages are not retried immediately.
-- No history charts, metric selectors or cost/time columns are rendered.
-- Core collectors raise structured errors; only the CLI prints its error messages.
+Codex daily totals are grouped by session start date, not per-event consumption.
+Session totals use JSONL logs; model totals use SQLite threads and can differ.
+Native model lists show the top 20 entries; their totals and shares use those entries.
+
+Claude counts each message/request identity once across files, retaining the snapshot
+with the greatest total usage (latest timestamp breaks ties). Counters from duplicate
+snapshots are not added together. Project grouping uses complete paths. File caches
+track identity/change time as well as size/mtime; failed reads are retried, not cached.
