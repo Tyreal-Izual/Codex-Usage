@@ -729,6 +729,7 @@ def sqlite_threads_summary(codex_home: Path, top_n: int) -> dict[str, Any]:
     for db_path in candidates:
         if not db_path.exists():
             continue
+        con = None
         try:
             con = connect_sqlite_readonly(db_path)
             cur = con.cursor()
@@ -739,7 +740,6 @@ def sqlite_threads_summary(codex_home: Path, top_n: int) -> dict[str, Any]:
                 )
             }
             if "threads" not in tables:
-                con.close()
                 continue
             cols = [row[1] for row in cur.execute("PRAGMA table_info(threads)")]
             has_tokens = "tokens_used" in cols
@@ -801,12 +801,14 @@ def sqlite_threads_summary(codex_home: Path, top_n: int) -> dict[str, Any]:
                             "tokens_used": int(tokens or 0),
                         }
                     )
-            con.close()
             summaries.append(basic)
         except sqlite3.Error as exc:
             summaries.append(
                 {"database": str(db_path), "error": f"{type(exc).__name__}: {exc}"}
             )
+        finally:
+            if con is not None:
+                con.close()
     selected = next(
         (
             s

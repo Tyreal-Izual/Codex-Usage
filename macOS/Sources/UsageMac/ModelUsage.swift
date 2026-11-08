@@ -89,10 +89,14 @@ private struct ModelShareBar: View {
         GeometryReader { geometry in
             HStack(spacing: 0) {
                 ForEach(distribution.rows) { row in
-                    Rectangle().fill(DashboardTheme.modelColors[row.colorIndex % DashboardTheme.modelColors.count])
-                        .frame(width: geometry.size.width * (distribution.share(of: row) ?? 0))
-                        .help(row.id + ": " + (row.tokens.map { JSONValue.number($0).display } ?? "—")
-                              + " (" + (distribution.share(of: row).map { String(format: "%.1f%%", $0 * 100) } ?? "—") + ")")
+                    let share = distribution.share(of: row)
+                    let color = DashboardTheme.modelColors[row.colorIndex % DashboardTheme.modelColors.count]
+                    let tokens = row.tokens.map { JSONValue.number($0).display } ?? "—"
+                    let percent = share.map { String(format: "%.1f%%", $0 * 100) } ?? "—"
+                    let help = "\(row.id): \(tokens) (\(percent))"
+                    Rectangle().fill(color)
+                        .frame(width: geometry.size.width * CGFloat(share ?? 0))
+                        .help(help)
                 }
             }
         }

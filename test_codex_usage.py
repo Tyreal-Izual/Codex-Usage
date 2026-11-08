@@ -6,7 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import codex_usage as codex
 from usage_common import CollectionError
@@ -59,6 +59,15 @@ class SessionCacheTest(unittest.TestCase):
         result = codex.collect_local_usage(self.home, 10)
         self.assertEqual(result['sessions']['session_files'], 0)
         self.assertEqual(result['sessions']['final_token_totals_sum'], {})
+
+    def test_sqlite_query_failure_always_closes_the_connection(self):
+        (self.home / 'state_5.sqlite').write_bytes(b'fixture')
+        connection = Mock()
+        connection.cursor.return_value.execute.side_effect = codex.sqlite3.DatabaseError('read failed')
+        with patch.object(codex, 'connect_sqlite_readonly', return_value=connection):
+            result = codex.sqlite_threads_summary(self.home, 10)
+        connection.close.assert_called_once()
+        self.assertIn('read failed', result['selected']['error'])
 
     def test_missing_home_raises_message_without_replacing_stderr(self):
         original = sys.stderr
