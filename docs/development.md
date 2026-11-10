@@ -18,12 +18,16 @@
 SwiftUI owns a persistent Python helper and communicates over stdin/stdout, with no
 HTTP listener or WebView. Sources return independently; source changes invalidate old
 replies. EOF, process exit and invalid responses close the helper session, fail pending
-requests and expose Reconnect in the toolbar/menu. Reconnect is also available while
-collecting, so a stalled request can be interrupted. Reports time out after 120 seconds;
-control requests after 15 seconds. A timeout closes the session and requires reconnect.
+requests and expose Reconnect in the toolbar/menu. During collection it appears only
+after a request has waited 12 seconds, so routine refreshes do not flash the button.
+Timed-out reports keep it available until a later report result or explicit cancellation.
+Reports time out after 120 seconds individually, then share a 15-second `hello` probe
+outside the worker pool. A healthy reply preserves the session and polling; a failed
+probe disconnects it. Control-request timeouts still close the session.
 Intentional shutdown is silent. Radar owns a separate worker. UI preferences persist
 in UserDefaults; source edits during connection are applied before the initial refresh.
-Startup outlives the window, and changing the polling interval reschedules it immediately.
+AppDelegate owns the model and starts it at application launch, even with no window.
+Changing the polling interval reschedules it immediately.
 Request IDs, `days` and `top` use explicit JSON integers on the private wire.
 
 ## Configuration

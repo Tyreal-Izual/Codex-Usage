@@ -3,6 +3,28 @@ import XCTest
 
 final class DashboardLifecycleTests: XCTestCase {
     @MainActor
+    func testIsolatedTimeoutKeepsPollingAndRecoveryUntilNextReply() async throws {
+        let fixture = ModelFixture()
+        defer { fixture.close() }
+        fixture.model.interval = 3
+        fixture.model.automatic = true
+        fixture.client.failNextReports = ["online-usage"]
+        await fixture.model.start()
+        let loaded = await eventually { fixture.model.canRefresh }
+        XCTAssertTrue(loaded)
+        let local = fixture.model.reports[.local]
+        XCTAssertTrue(fixture.model.connected)
+        XCTAssertNil(fixture.model.connectionError)
+        XCTAssertNotNil(fixture.model.errors[.online])
+        XCTAssertTrue(fixture.model.offersReconnect)
+        let recovered = await eventually { fixture.model.errors[.online] == nil && fixture.model.canRefresh }
+        XCTAssertTrue(recovered, "Automatic polling must continue after an isolated timeout")
+        XCTAssertFalse(fixture.model.offersReconnect)
+        XCTAssertEqual(fixture.client.starts, 1)
+        XCTAssertEqual(fixture.model.reports[.local], local)
+    }
+
+    @MainActor
     func testIntervalChangeReplacesTheCurrentLongSleep() async throws {
         let fixture = ModelFixture()
         defer { fixture.close() }
@@ -20,10 +42,11 @@ final class DashboardLifecycleTests: XCTestCase {
     @MainActor
     func testAppOwnedStartupSurvivesCancelledWindowTask() async throws {
         let fixture = ModelFixture()
-        defer { fixture.close(); AppDelegate.model = nil }
+        defer { fixture.close() }
+        let delegate = AppDelegate(model: fixture.model)
         fixture.client.holdNextHello = true
         let windowTask = Task {
-            AppDelegate.startCollectors(fixture.model)
+            delegate.applicationDidFinishLaunching(Notification(name: Notification.Name("testLaunch")))
             try? await Task.sleep(for: .seconds(30))
         }
         defer { windowTask.cancel() }
@@ -41,6 +64,57 @@ final class DashboardLifecycleTests: XCTestCase {
     }
 
     @MainActor
+    func testLaunchWithoutAWindowStartsAndTerminationStopsCollectors() async throws {
+        let fixture = ModelFixture()
+        defer { fixture.close() }
+        let delegate = AppDelegate(model: fixture.model)
+        XCTAssertTrue(delegate.model === fixture.model)
+        delegate.applicationDidFinishLaunching(Notification(name: Notification.Name("testLaunch")))
+        let ready = await eventually { delegate.model.canRefresh }
+        XCTAssertTrue(ready)
+        XCTAssertEqual(fixture.client.starts, 1)
+        delegate.applicationWillTerminate(Notification(name: Notification.Name("testTermination")))
+        XCTAssertFalse(fixture.model.connected)
+        XCTAssertTrue(fixture.model.pending.isEmpty)
+    }
+
+    @MainActor
+    func testFastRefreshDoesNotShowDelayedReconnect() async throws {
+        let fixture = ModelFixture()
+        defer { fixture.close() }
+        await fixture.model.start()
+        XCTAssertFalse(fixture.model.offersReconnect)
+        let ready = await eventually { fixture.model.canRefresh }
+        XCTAssertTrue(ready)
+        try await Task.sleep(for: .milliseconds(150))
+        XCTAssertFalse(fixture.model.offersReconnect)
+        XCTAssertFalse(fixture.model.collectionIsSlow)
+    }
+
+    @MainActor
+    func testOtherSourceRefreshesDoNotResetTheSlowRequestsDeadline() async throws {
+        let fixture = ModelFixture()
+        defer { fixture.close() }
+        fixture.client.heldReports = ["local-usage"]
+        await fixture.model.start()
+        let poll = Task {
+            while !Task.isCancelled {
+                fixture.model.refresh(reports: [.online])
+                do { try await Task.sleep(for: .milliseconds(20)) }
+                catch { return }
+            }
+        }
+        defer { poll.cancel() }
+        let slow = await eventually { fixture.model.offersReconnect }
+        XCTAssertTrue(slow)
+        poll.cancel()
+        fixture.client.releaseFirst()
+        let ready = await eventually { fixture.model.canRefresh }
+        XCTAssertTrue(ready)
+        XCTAssertFalse(fixture.model.offersReconnect)
+    }
+
+    @MainActor
     func testBusyCollectorCanBeReconnectedWithoutWaitingForTimeout() async throws {
         let fixture = ModelFixture()
         defer { fixture.close() }
@@ -49,7 +123,9 @@ final class DashboardLifecycleTests: XCTestCase {
         let pending = await eventually { fixture.client.held.count == 1 }
         XCTAssertTrue(pending)
         XCTAssertFalse(fixture.model.canRefresh)
-        XCTAssertTrue(fixture.model.offersReconnect)
+        XCTAssertFalse(fixture.model.offersReconnect)
+        let slow = await eventually { fixture.model.offersReconnect }
+        XCTAssertTrue(slow)
         fixture.client.heldReports = []
         await fixture.model.reconnect()
         let ready = await eventually { fixture.model.canRefresh }
@@ -259,7 +335,7 @@ private final class ModelFixture {
         let defaults = UserDefaults(suiteName: name)!
         defaults.set(["codex", "claude", "isambard", "radar"], forKey: "sources")
         defaults.set(false, forKey: "automatic")
-        model = DashboardModel(defaults: defaults, demo: false, client: client)
+        model = DashboardModel(defaults: defaults, demo: false, client: client, reconnectDelay: .milliseconds(80))
     }
     func close() {
         model.stop()
@@ -282,6 +358,7 @@ private final class FakeCollectorConnection: CollectorConnection {
     var starts = 0
     var requests: [Request] = []
     var heldReports: Set<String> = []
+    var failNextReports: Set<String> = []
     var holdNextHello = false
     var holdNextConfigure = false
     var held: [(Request, CheckedContinuation<JSONValue, Error>)] = []
@@ -289,6 +366,8 @@ private final class FakeCollectorConnection: CollectorConnection {
     func request(_ action: String, values: [String: JSONValue]) async throws -> JSONValue {
         let request = Request(action: action, values: values)
         requests.append(request)
+        if action == "report", let report = values["report"]?.text,
+           failNextReports.remove(report) != nil { throw BridgeError.reportTimeout }
         let holdHello = action == "hello" && holdNextHello
         let holdConfigure = action == "configure" && holdNextConfigure
         if holdHello || holdConfigure || heldReports.contains(values["report"]?.text ?? "") {

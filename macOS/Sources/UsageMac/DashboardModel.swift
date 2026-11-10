@@ -64,22 +64,28 @@ final class DashboardModel {
     var connecting = false
     var adminEnabled = false
     var diagnostics = ""
+    private(set) var collectionIsSlow = false
     let demo: Bool
     @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored private let client: any CollectorConnection
     @ObservationIgnored private var tasks: [Report: Task<Void, Never>] = [:]
     @ObservationIgnored private var requestIDs: [Report: UUID] = [:]
+    @ObservationIgnored private var reconnectDeadlines: [Report: ContinuousClock.Instant] = [:]
+    @ObservationIgnored private var timedOutReports: Set<Report> = []
+    @ObservationIgnored private var slowCollectionCheck: Task<Void, Never>?
     @ObservationIgnored private var timer: Task<Void, Never>?
     @ObservationIgnored private var historyRefresh: Task<Void, Never>?
     @ObservationIgnored private var revision = UUID()
     @ObservationIgnored private var connectionID = UUID()
     private static let historyReports: Set<Report> = [.local, .claude, .api]
+    private let reconnectDelay: Duration
 
     init(defaults: UserDefaults = .standard, demo: Bool = ProcessInfo.processInfo.arguments.contains("--demo"),
-         client: (any CollectorConnection)? = nil) {
+         client: (any CollectorConnection)? = nil, reconnectDelay: Duration = .seconds(12)) {
         self.defaults = defaults
         self.demo = demo
         self.client = client ?? CollectorClient()
+        self.reconnectDelay = reconnectDelay
         language = Language(rawValue: defaults.string(forKey: "language") ?? "")
             ?? (Locale.preferredLanguages.first?.hasPrefix("zh") == true ? .zh : .en)
         days = min(365, max(1, defaults.object(forKey: "days") as? Int ?? 30))
@@ -94,7 +100,7 @@ final class DashboardModel {
 
     var canRefresh: Bool { connected && !connecting && pending.isEmpty && !demo }
     var needsReconnect: Bool { !connected && !connecting && !demo }
-    var offersReconnect: Bool { !demo && !connecting && (needsReconnect || !pending.isEmpty) }
+    var offersReconnect: Bool { !demo && !connecting && (needsReconnect || collectionIsSlow) }
 
     var isambardEnabled: Bool {
         get { sources.contains("isambard") }
@@ -126,6 +132,23 @@ final class DashboardModel {
             requestIDs.removeValue(forKey: report)
             tasks.removeValue(forKey: report)?.cancel()
             pending.remove(report)
+            reconnectDeadlines.removeValue(forKey: report)
+            timedOutReports.remove(report)
+        }
+        updateSlowCollection()
+    }
+
+    private func updateSlowCollection() {
+        slowCollectionCheck?.cancel()
+        slowCollectionCheck = nil
+        let clock = ContinuousClock()
+        collectionIsSlow = !timedOutReports.isEmpty || reconnectDeadlines.values.contains { $0 <= clock.now }
+        guard !collectionIsSlow, let deadline = reconnectDeadlines.values.min() else { return }
+        slowCollectionCheck = Task { [weak self] in
+            do { try await clock.sleep(until: deadline) }
+            catch { return }
+            guard let self, !Task.isCancelled else { return }
+            self.updateSlowCollection()
         }
     }
 
@@ -238,6 +261,7 @@ final class DashboardModel {
             if report == .api && !adminEnabled { continue }
             let requestID = UUID()
             requestIDs[report] = requestID
+            reconnectDeadlines[report] = ContinuousClock().now.advanced(by: reconnectDelay)
             pending.insert(report)
             tasks[report] = Task { [weak self] in
                 guard let self else { return }
@@ -246,6 +270,8 @@ final class DashboardModel {
                         self.pending.remove(report)
                         self.tasks.removeValue(forKey: report)
                         self.requestIDs.removeValue(forKey: report)
+                        self.reconnectDeadlines.removeValue(forKey: report)
+                        self.updateSlowCollection()
                     }
                 }
                 do {
@@ -254,6 +280,7 @@ final class DashboardModel {
                         "top": .integer(20), "force": .bool(force)
                     ])
                     guard self.revision == current, self.requestIDs[report] == requestID, !Task.isCancelled else { return }
+                    self.timedOutReports.remove(report)
                     let data = report == .radar ? value : value["data"]
                     let message = collectionError(data: data, envelope: value)
                     if data["ok"].flag != false || self.reports[report] == nil { self.reports[report] = data }
@@ -262,10 +289,12 @@ final class DashboardModel {
                 } catch is CancellationError { }
                 catch {
                     guard self.revision == current, self.requestIDs[report] == requestID else { return }
+                    if case BridgeError.reportTimeout = error { self.timedOutReports.insert(report) }
                     self.errors[report] = error.localizedDescription
                 }
             }
         }
+        updateSlowCollection()
     }
 
     func checkSetup() async {

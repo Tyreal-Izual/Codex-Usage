@@ -93,6 +93,35 @@ class NativeBackendTest(unittest.TestCase):
                 worker.join(5)
             self.assertFalse(worker.is_alive())
 
+    def test_hello_responds_while_both_report_workers_are_blocked(self):
+        incoming, outgoing = queue.Queue(), queue.Queue()
+        entered = threading.Barrier(3)
+        release = threading.Event()
+        reader = Mock(readline=lambda *args: incoming.get(timeout=5))
+        writer = Mock(write=lambda line: outgoing.put(json.loads(line)), flush=lambda: None)
+        def slow(*args, **kwargs):
+            entered.wait(timeout=3)
+            release.wait(5)
+            return {'ok': True}, []
+        with patch.object(native, 'collect_report', side_effect=slow):
+            worker = threading.Thread(target=native.serve, args=(self.backend, reader, writer))
+            worker.start()
+            try:
+                incoming.put('{"id":1,"action":"report","report":"local-usage"}\n')
+                incoming.put('{"id":2,"action":"report","report":"online-usage"}\n')
+                entered.wait(timeout=3)
+                incoming.put('{"id":3,"action":"hello"}\n')
+                heartbeat = outgoing.get(timeout=2)
+                self.assertEqual(heartbeat['id'], 3)
+                self.assertEqual(heartbeat['result']['protocol'], 1)
+                release.set()
+                self.assertEqual({outgoing.get(timeout=3)['id'], outgoing.get(timeout=3)['id']}, {1, 2})
+            finally:
+                release.set()
+                incoming.put('')
+                worker.join(5)
+            self.assertFalse(worker.is_alive())
+
     def test_subprocess_stdout_contains_only_protocol_and_eof_exits(self):
         env = {**os.environ, 'CODEX_HOME': self.temp.name, 'CLAUDE_CONFIG_DIR': self.temp.name}
         result = subprocess.run([sys.executable, '-B', native.__file__, '--sources', 'codex'],

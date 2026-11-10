@@ -20,13 +20,17 @@ final class CollectorClient: CollectorConnection {
     private var generation = UUID()
     private var pending: [Int: CheckedContinuation<JSONValue, Error>] = [:]
     private var timeouts: [Int: Task<Void, Never>] = [:]
+    private var healthProbe: Task<Void, Never>?
     private let environmentOverrides: [String: String]
     private let reportTimeout: Duration
+    private let controlTimeout: Duration
     private static let ignoreBrokenPipe: Void = { _ = signal(SIGPIPE, SIG_IGN) }()
 
-    init(environment: [String: String] = [:], reportTimeout: Duration = .seconds(120)) {
+    init(environment: [String: String] = [:], reportTimeout: Duration = .seconds(120),
+         controlTimeout: Duration = .seconds(15)) {
         environmentOverrides = environment
         self.reportTimeout = reportTimeout
+        self.controlTimeout = controlTimeout
         _ = Self.ignoreBrokenPipe
     }
 
@@ -101,7 +105,7 @@ final class CollectorClient: CollectorConnection {
         payload["id"] = .integer(id)
         var data = try JSONEncoder().encode(JSONValue.object(payload))
         data.append(0x0A)
-        let timeout = action == "report" ? reportTimeout : .seconds(15)
+        let timeout = action == "report" ? reportTimeout : controlTimeout
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 pending[id] = continuation
@@ -109,7 +113,12 @@ final class CollectorClient: CollectorConnection {
                     do { try await Task.sleep(for: timeout) }
                     catch { return }
                     guard let self, self.pending[id] != nil else { return }
-                    self.disconnected("Collection timed out. Reconnect to try again.")
+                    if action == "report" {
+                        self.finish(id, result: .failure(BridgeError.reportTimeout))
+                        self.checkHealth()
+                    } else {
+                        self.disconnected("Collector control request timed out. Reconnect to try again.")
+                    }
                 }
                 do { try input.write(contentsOf: data) }
                 catch { disconnected("Collector connection failed: \(error.localizedDescription)") }
@@ -149,6 +158,26 @@ final class CollectorClient: CollectorConnection {
         pending.removeValue(forKey: id)?.resume(with: result)
     }
 
+    private func checkHealth() {
+        guard healthProbe == nil else { return }
+        let session = generation
+        healthProbe = Task { [weak self] in
+            guard let self, self.generation == session, !Task.isCancelled else { return }
+            defer { if self.generation == session { self.healthProbe = nil } }
+            do {
+                // hello runs on the helper's input thread, independently of report workers.
+                let reply = try await self.request("hello")
+                guard self.generation == session, !Task.isCancelled else { return }
+                guard reply["protocol"].number == 1 else {
+                    throw BridgeError.message("Invalid collector health response")
+                }
+            } catch {
+                guard self.generation == session, !Task.isCancelled else { return }
+                self.disconnected("Collector health check failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
     private func disconnected(_ message: String) {
         guard process != nil || input != nil || output != nil else { return }
         close(message)
@@ -158,6 +187,8 @@ final class CollectorClient: CollectorConnection {
     private func close(_ message: String) {
         // Invalidate queued EOF/termination callbacks before releasing the session.
         generation = UUID()
+        healthProbe?.cancel()
+        healthProbe = nil
         let task = process
         process = nil
         task?.terminationHandler = nil

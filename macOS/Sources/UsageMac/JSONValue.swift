@@ -75,7 +75,13 @@ struct BridgeReply: Decodable {
 
 enum BridgeError: LocalizedError {
     case message(String)
-    var errorDescription: String? { if case .message(let message) = self { return message }; return nil }
+    case reportTimeout
+    var errorDescription: String? {
+        switch self {
+        case .message(let message): return message
+        case .reportTimeout: return "Report collection timed out."
+        }
+    }
 }
 
 struct LimitWindows {

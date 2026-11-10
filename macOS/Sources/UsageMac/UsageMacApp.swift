@@ -3,26 +3,37 @@ import SwiftUI
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    static weak var model: DashboardModel?
-    static func startCollectors(_ model: DashboardModel) {
-        Self.model = model
-        // Collection belongs to the app, so closing its window must not cancel startup.
-        Task { await model.start() }
+    let model: DashboardModel
+    private var startup: Task<Void, Never>?
+
+    override init() {
+        model = DashboardModel()
+        super.init()
     }
-    func applicationWillTerminate(_ notification: Notification) { Self.model?.stop() }
+    init(model: DashboardModel) {
+        self.model = model
+        super.init()
+    }
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        guard startup == nil else { return }
+        startup = Task { [model] in await model.start() }
+    }
+    func applicationWillTerminate(_ notification: Notification) {
+        startup?.cancel()
+        model.stop()
+    }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 }
 
 @main
 struct UsageMacApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
-    @State private var model = DashboardModel()
+    private var model: DashboardModel { delegate.model }
     var body: some Scene {
         Window("Usage", id: "dashboard") {
             DashboardView(model: model)
                 .modifier(DashboardAppearance())
                 .environment(\.locale, model.language.locale)
-                .onAppear { AppDelegate.startCollectors(model) }
         }
         .defaultSize(width: 1120, height: 800)
         .commands {
