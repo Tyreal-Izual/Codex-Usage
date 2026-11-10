@@ -53,6 +53,13 @@ class NativeBackendTest(unittest.TestCase):
         for sources in ('all', ['unknown'], [3]):
             with self.assertRaises(ValueError): self.backend.handle({'action': 'configure', 'sources': sources})
 
+    def test_report_integer_fields_reject_floats_booleans_and_strings(self):
+        for key in ('days', 'top'):
+            for value in (30.0, 1.5, True, '30'):
+                with self.subTest(key=key, value=value), self.assertRaisesRegex(ValueError, 'integer'):
+                    self.backend.handle({'action': 'report', 'report': 'local-usage', key: value})
+        self.assertTrue(self.backend.handle({'action': 'report', 'report': 'local-usage', 'days': 30, 'top': 20})['ok'])
+
     def test_bad_request_does_not_corrupt_next_response(self):
         incoming = io.StringIO('not-json\n[]\n{"id":true,"action":"hello"}\n{"id":1,"action":"hello"}\n')
         outgoing = io.StringIO()

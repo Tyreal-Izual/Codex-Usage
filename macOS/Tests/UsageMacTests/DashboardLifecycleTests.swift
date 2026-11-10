@@ -3,6 +3,62 @@ import XCTest
 
 final class DashboardLifecycleTests: XCTestCase {
     @MainActor
+    func testIntervalChangeReplacesTheCurrentLongSleep() async throws {
+        let fixture = ModelFixture()
+        defer { fixture.close() }
+        fixture.model.interval = 300
+        fixture.model.automatic = true
+        await fixture.model.start()
+        let loaded = await eventually { fixture.model.canRefresh }
+        XCTAssertTrue(loaded)
+        let count = fixture.client.requests.count
+        fixture.model.interval = 3
+        let refreshed = await eventually { fixture.client.requests.count > count }
+        XCTAssertTrue(refreshed, "The old 300-second sleep must be cancelled")
+    }
+
+    @MainActor
+    func testAppOwnedStartupSurvivesCancelledWindowTask() async throws {
+        let fixture = ModelFixture()
+        defer { fixture.close(); AppDelegate.model = nil }
+        fixture.client.holdNextHello = true
+        let windowTask = Task {
+            AppDelegate.startCollectors(fixture.model)
+            try? await Task.sleep(for: .seconds(30))
+        }
+        defer { windowTask.cancel() }
+        let waiting = await eventually { fixture.client.held.count == 1 }
+        XCTAssertTrue(waiting)
+        XCTAssertTrue(fixture.model.connecting)
+        XCTAssertFalse(fixture.model.needsReconnect)
+        windowTask.cancel()
+        await windowTask.value
+        fixture.client.releaseFirst()
+        let ready = await eventually { fixture.model.canRefresh }
+        XCTAssertTrue(ready)
+        XCTAssertFalse(fixture.model.needsReconnect)
+        XCTAssertFalse(fixture.model.reports.isEmpty)
+    }
+
+    @MainActor
+    func testBusyCollectorCanBeReconnectedWithoutWaitingForTimeout() async throws {
+        let fixture = ModelFixture()
+        defer { fixture.close() }
+        fixture.client.heldReports = ["local-usage"]
+        await fixture.model.start()
+        let pending = await eventually { fixture.client.held.count == 1 }
+        XCTAssertTrue(pending)
+        XCTAssertFalse(fixture.model.canRefresh)
+        XCTAssertTrue(fixture.model.offersReconnect)
+        fixture.client.heldReports = []
+        await fixture.model.reconnect()
+        let ready = await eventually { fixture.model.canRefresh }
+        XCTAssertTrue(ready)
+        XCTAssertFalse(fixture.model.offersReconnect)
+        XCTAssertEqual(fixture.client.starts, 2)
+    }
+
+    @MainActor
     func testSourceEditsDuringStartupAndReconnectAreAppliedBeforeRefreshing() async throws {
         for reconnecting in [false, true] {
             let fixture = ModelFixture()
@@ -181,12 +237,13 @@ final class DashboardLifecycleTests: XCTestCase {
         XCTAssertFalse(fixture.model.connecting)
         XCTAssertFalse(fixture.model.canRefresh)
         XCTAssertNil(fixture.model.connectionError)
+        XCTAssertTrue(fixture.model.offersReconnect)
     }
 }
 
 @MainActor
 private func eventually(_ condition: () -> Bool) async -> Bool {
-    for _ in 0..<300 {
+    for _ in 0..<600 {
         if condition() { return true }
         try? await Task.sleep(for: .milliseconds(10))
     }

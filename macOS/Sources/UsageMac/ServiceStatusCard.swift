@@ -6,13 +6,13 @@ struct ServiceStatusCard: View {
     @State private var expanded = false
     private var state: ServiceState { ServiceState(status) }
     private var titleParts: [String] {
-        status["title"].display.split(separator: ":", maxSplits: 1)
+        status["title"].display(locale: language.locale).split(separator: ":", maxSplits: 1)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
     }
     private var condition: String {
         guard titleParts.count == 2, !titleParts[1].isEmpty else { return state.title(language) }
         let detail = titleParts[1]
-        return detail.lowercased() == "no known issues" ? state.title(language) : detail
+        return state.condition(detail, language: language)
     }
 
     var body: some View {
@@ -38,12 +38,12 @@ struct ServiceStatusCard: View {
                 .padding(.horizontal, 14).padding(.vertical, 10).contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(status["title"].display + ", " + state.title(language))
+            .accessibilityLabel(status["title"].display(locale: language.locale) + ", " + state.title(language))
             .accessibilityValue(expanded ? language.text("Expanded", "已展开") : language.text("Collapsed", "已收起"))
             .accessibilityHint(language.text("Show or hide service details", "展开或收起服务说明"))
-            .help(status["title"].display)
+            .help(status["title"].display(locale: language.locale))
             if expanded {
-                Text(status["body"].display)
+                Text(status["body"].display(locale: language.locale))
                     .font(.body).foregroundStyle(DashboardTheme.muted)
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
@@ -58,7 +58,7 @@ struct ServiceStatusCard: View {
     }
 
     private var serviceName: some View {
-        Text(titleParts.first ?? status["title"].display).font(.title3.weight(.bold))
+        Text(titleParts.first ?? status["title"].display(locale: language.locale)).font(.title3.weight(.bold))
     }
     private var statusBadge: some View {
         Label(condition, systemImage: state.symbol)
@@ -74,15 +74,24 @@ struct ServiceStatusCard: View {
     }
 }
 
-private enum ServiceState {
+enum ServiceState: Equatable {
     case operational, degraded, outage, unknown
 
     init(_ status: JSONValue) {
         let css = status["class"].text.lowercased(), title = status["title"].text.lowercased()
-        if css.contains("success") || title.contains("no known issue") { self = .operational }
+        let detail = title.split(separator: ":", maxSplits: 1).last.map(String.init) ?? title
+        if css.contains("success") || Self.isHealthy(detail) { self = .operational }
         else if css.contains("warning") || title.contains("degraded") || title.contains("at risk") { self = .degraded }
         else if css.contains("failure") || title.contains("outage") { self = .outage }
         else { self = .unknown }
+    }
+
+    private static func isHealthy(_ detail: String) -> Bool {
+        ["no known issue", "no known issues"].contains(detail.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
+    }
+
+    func condition(_ detail: String, language: Language) -> String {
+        Self.isHealthy(detail) ? title(language) : detail
     }
 
     var color: Color {

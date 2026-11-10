@@ -108,23 +108,21 @@ struct IsambardView: View {
         Panel(title: language.text("Isambard Status", "Isambard 服务状态"), subtitle: localDate(data["status"]["fetched_at"], language: language)) {
             if data["warning"] != .null { Notice(text: data["warning"].display) }
             EqualWidthCardsLayout(minimumColumnWidth: 250, maximumColumns: 3, spacing: 12) {
-                ForEach(data["status"]["statuses"].items, id: \.statusIdentity) { status in
-                    ServiceStatusCard(status: status, language: language)
+                ForEach(identifiedValues(data["status"]["statuses"].items, key: { $0.statusIdentity })) { entry in
+                    ServiceStatusCard(status: entry.value, language: language)
                 }
             }
             if maintenance {
                 DashboardDivider()
                 Text(language.text("Planned maintenance", "计划维护")).font(.headline)
-                RecordTable(headers: data["status"]["maintenance_headers"].items.map(\.display),
-                            rows: data["status"]["maintenance_rows"].items.map {
-                    TabularRow(id: $0.items.map(\.display).joined(separator: "|"), cells: $0.items.map(\.display))
-                }, language: language)
+                RecordTable(headers: data["status"]["maintenance_headers"].items.map { $0.display(locale: language.locale) },
+                            rows: arrayRows(data["status"]["maintenance_rows"].items, language: language), language: language)
             }
         }
     }
 }
 
-private extension JSONValue {
+extension JSONValue {
     // Status text can change independently of the service's identity.
     var statusIdentity: String { self["title"].text.components(separatedBy: ":").first ?? self["title"].text }
 }
@@ -138,12 +136,12 @@ struct AdminView: View {
                 if data["usage"]["error"] != .null { Notice(text: data["usage"]["error"].errorText) }
                 if data["usage"]["has_more"].flag == true { Notice(text: language.text("More records exist beyond the collection limit.", "仍有记录超出本次采集上限。")) }
                 RecordTable(headers: [language.text("Date", "日期"), language.text("Model", "模型"), language.text("Requests", "请求"), "Tokens"],
-                            rows: rows(data["usage"]["rows"].items, identity: "start_time", keys: ["start_time_local", "model", "num_model_requests", "total_tokens"]), language: language)
+                            rows: rows(data["usage"]["rows"].items, identity: "start_time", keys: ["start_time_local", "model", "num_model_requests", "total_tokens"], language: language), language: language)
             }
             Panel(title: language.text("Organization costs", "组织费用")) {
                 if data["costs"]["error"] != .null { Notice(text: data["costs"]["error"].errorText) }
                 RecordTable(headers: [language.text("Date", "日期"), language.text("Item", "项目"), language.text("Amount", "金额"), language.text("Currency", "币种")],
-                            rows: rows(data["costs"]["rows"].items, identity: "start_time", keys: ["start_time_local", "line_item", "amount", "currency"]), language: language)
+                            rows: rows(data["costs"]["rows"].items, identity: "start_time", keys: ["start_time_local", "line_item", "amount", "currency"], language: language), language: language)
             }
         }
     }

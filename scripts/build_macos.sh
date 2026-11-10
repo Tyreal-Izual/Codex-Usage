@@ -11,9 +11,7 @@ if [[ "$MODE" != --release && "$MODE" != --development ]]; then
   echo "Usage: $0 [--release | --development]" >&2
   exit 1
 fi
-if [[ -z "${DEVELOPER_DIR:-}" && -d /Applications/Xcode.app/Contents/Developer ]]; then
-  export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
-fi
+source "$ROOT/scripts/xcode_env.sh"
 PYTHON="${USAGE_PYTHON:-python3}"
 APP="$ROOT/dist/Usage.app"
 mkdir -p "$ROOT/.build" "$APP/Contents/MacOS" "$APP/Contents/Resources"
@@ -24,7 +22,9 @@ BIN_DIR="$(xcrun swift build --package-path macOS --scratch-path "$ROOT/.build/s
 cp "$BIN_DIR/UsageMac" "$APP/Contents/MacOS/UsageMac"
 if [[ "$MODE" == --development ]]; then
   # This runner deliberately keeps the checkout dependency for fast iteration.
-  "$PYTHON" - "$APP/Contents/Resources/helper/usage-helper" "$ROOT/native_backend.py" <<'PY'
+  HELPER_SOURCE="$ROOT/.build/development-helper"
+  rm -rf "$HELPER_SOURCE"
+  "$PYTHON" - "$HELPER_SOURCE/usage-helper" "$ROOT/native_backend.py" <<'PY'
 import pathlib, shlex, sys
 path = pathlib.Path(sys.argv[1])
 path.parent.mkdir(parents=True, exist_ok=True)
@@ -38,10 +38,11 @@ else
   .build/python/bin/python -m PyInstaller --noconfirm --onedir --name usage-helper \
     --distpath "$ROOT/.build/frozen" --workpath "$ROOT/.build/pyinstaller" \
     --specpath "$ROOT/.build" --log-level WARN native_backend.py
-  # Only replace generated helper files inside the app bundle.
-  rm -rf "$APP/Contents/Resources/helper"
-  cp -R "$ROOT/.build/frozen/usage-helper" "$APP/Contents/Resources/helper"
+  HELPER_SOURCE="$ROOT/.build/frozen/usage-helper"
 fi
+# Replace the entire generated helper in either mode, including old frozen libraries.
+rm -rf "$APP/Contents/Resources/helper"
+cp -R "$HELPER_SOURCE" "$APP/Contents/Resources/helper"
 cp macOS/Info.plist "$APP/Contents/Info.plist"
 cp LICENCE "$APP/Contents/Resources/LICENCE"
 xcrun swift scripts/make_icon.swift "$ROOT/.build/Usage.iconset"

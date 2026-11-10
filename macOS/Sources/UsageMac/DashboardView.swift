@@ -97,7 +97,7 @@ struct DashboardView: View {
             .navigationTitle((selection ?? .overview).title(language))
             .toolbar {
                 ToolbarItemGroup {
-                    if model.needsReconnect {
+                    if model.offersReconnect {
                         Button { Task { await model.reconnect() } } label: {
                             Label(language.text("Reconnect", "重新连接"), systemImage: "arrow.triangle.2.circlepath")
                         }.disabled(model.connecting)
@@ -115,7 +115,6 @@ struct DashboardView: View {
         }
         .frame(minWidth: 760, minHeight: 560)
         .background(DashboardTheme.background)
-        .task { await model.start() }
         .fileExporter(isPresented: $exporting, document: exportDocument, contentType: .json,
                       defaultFilename: "usage-\(Date().formatted(.iso8601.year().month().day().dateSeparator(.dash)))") { result in
             if case .failure(let error) = result { exportError = error.localizedDescription }

@@ -39,7 +39,7 @@ struct CodexLimits: View {
         let reached = rate["rate_limit"]["limit_reached"]
         let collected = LimitFormatting.retrievedAt(data)
         return [
-            PanelFact(id: "plan", label: language.text("Plan", "套餐"), value: rate["plan_type"].display),
+            PanelFact(id: "plan", label: language.text("Plan", "套餐"), value: rate["plan_type"].display(locale: language.locale)),
             PanelFact(id: "reached", label: language.text("Limit Reached", "达到上限"),
                       value: LimitFormatting.boolean(reached, language: language), tone: LimitFormatting.reachedTone(reached)),
             PanelFact(id: "updated", label: language.text("Updated", "更新于"),

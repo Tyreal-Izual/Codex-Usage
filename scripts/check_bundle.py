@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Smoke-test a built app without accounts, network, or an external Python runtime."""
+"""Smoke-test release or development helpers with isolated account data."""
 import argparse
 import json
 import os
@@ -10,7 +10,7 @@ import tempfile
 from pathlib import Path
 
 
-def check(app: Path, *, https: bool = False) -> None:
+def check(app: Path, *, https: bool = False, development: bool = False) -> None:
     helper = app.resolve() / "Contents/Resources/helper/usage-helper"
     with tempfile.TemporaryDirectory() as directory:
         home = Path(directory)
@@ -40,11 +40,13 @@ def check(app: Path, *, https: bool = False) -> None:
             '{"id":2,"action":"report","report":"local-usage"}\n'
         )).splitlines())}
         assert replies[1]["result"]["protocol"] == 1
-        assert replies[1]["result"]["bundled_python"] is True, "Expected a release build with bundled Python"
+        assert replies[1]["result"]["bundled_python"] is (not development), "Helper does not match the requested build mode"
+        if development:
+            assert not (helper.parent / "_internal").exists(), "Development bundle retained frozen libraries"
         assert replies[2]["result"]["data"]["sqlite_threads"]["selected"]["tokens_used_sum"] == 42
         run("--statusline", "--install")
         command = json.loads((claude / "settings.json").read_text())["statusLine"]["command"]
-        assert "--statusline" in command
+        assert ("claude_usage_statusline.py" if development else "--statusline") in command
         payload = '{"rate_limits":{"five_hour":{"used_percentage":12,"resets_at":2000000000}}}'
         run("--statusline", payload=payload)
         assert json.loads((claude / "usage-dashboard.json").read_text())["rate_limits"]["five_hour"]["used_percentage"] == 12
@@ -61,5 +63,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("app", type=Path)
     parser.add_argument("--https", action="store_true", help="Also probe public HTTPS without account data")
+    parser.add_argument("--development", action="store_true", help="Check the source-backed helper and absence of frozen libraries")
     args = parser.parse_args()
-    check(args.app, https=args.https)
+    check(args.app, https=args.https, development=args.development)

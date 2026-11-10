@@ -2,7 +2,8 @@ import SwiftUI
 
 struct ModelDistribution {
     struct Row: Identifiable {
-        let id: String
+        let id: OccurrenceID
+        let name: String
         let count: String
         let tokens: Double?
         let colorIndex: Int
@@ -10,10 +11,12 @@ struct ModelDistribution {
     let rows: [Row]
     let total: Double?
 
-    init(items: [JSONValue], tokenKey: String, countKey: String) {
-        rows = items.enumerated().map { index, item in
+    init(items: [JSONValue], tokenKey: String, countKey: String, locale: Locale = Language.en.locale) {
+        rows = identifiedValues(items, key: { $0["model"].display }).enumerated().map { index, entry in
+            let item = entry.value
             let amount = item[tokenKey].number.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
-            return Row(id: item["model"].display, count: item[countKey].display, tokens: amount, colorIndex: index)
+            return Row(id: entry.id, name: item["model"].display,
+                       count: item[countKey].display(locale: locale), tokens: amount, colorIndex: index)
         }
         let known = rows.compactMap(\.tokens)
         total = known.isEmpty ? nil : known.reduce(0, +)
@@ -39,12 +42,12 @@ struct ModelUsage: View {
     var showDetails: (() -> Void)?
 
     var body: some View {
-        let distribution = ModelDistribution(items: items, tokenKey: tokenKey, countKey: countKey)
+        let distribution = ModelDistribution(items: items, tokenKey: tokenKey, countKey: countKey, locale: language.locale)
         TimelineView(.periodic(from: .now, by: 60)) { timeline in
             Panel(title: title, subtitle: subtitle, facts: updateFacts(now: timeline.date), fillHeight: fillHeight) {
                 HStack {
                     HStack(spacing: 4) {
-                        Text(distribution.total.map { JSONValue.number($0).display } ?? "—")
+                        Text(distribution.total.map { JSONValue.number($0).display(locale: language.locale) } ?? "—")
                             .highlightChanges(value: distribution.total.map { JSONValue.number($0).display })
                         Text(language.text("Tokens Used", "已用 token"))
                     }.accessibilityElement(children: .combine)
@@ -55,7 +58,7 @@ struct ModelUsage: View {
                         Text(language.text("Models", "个模型"))
                     }.accessibilityElement(children: .combine)
                 }.font(.subheadline.weight(.semibold)).foregroundStyle(DashboardTheme.muted).monospacedDigit()
-                ModelShareBar(distribution: distribution)
+                ModelShareBar(distribution: distribution, locale: language.locale)
                 if distribution.rows.isEmpty {
                     Text(unavailable ? language.text("Model data unavailable", "模型数据暂不可用")
                          : language.text("No model records yet", "暂无模型记录"))
@@ -85,15 +88,16 @@ struct ModelUsage: View {
 
 private struct ModelShareBar: View {
     let distribution: ModelDistribution
+    let locale: Locale
     var body: some View {
         GeometryReader { geometry in
             HStack(spacing: 0) {
                 ForEach(distribution.rows) { row in
                     let share = distribution.share(of: row)
                     let color = DashboardTheme.modelColors[row.colorIndex % DashboardTheme.modelColors.count]
-                    let tokens = row.tokens.map { JSONValue.number($0).display } ?? "—"
+                    let tokens = row.tokens.map { JSONValue.number($0).display(locale: locale) } ?? "—"
                     let percent = share.map { String(format: "%.1f%%", $0 * 100) } ?? "—"
-                    let help = "\(row.id): \(tokens) (\(percent))"
+                    let help = "\(row.name): \(tokens) (\(percent))"
                     Rectangle().fill(color)
                         .frame(width: geometry.size.width * CGFloat(share ?? 0))
                         .help(help)
@@ -125,10 +129,10 @@ private struct ModelUsageTable: View {
                 GridRow(alignment: .center) {
                     HStack(spacing: 8) {
                         Circle().fill(DashboardTheme.modelColors[row.colorIndex % DashboardTheme.modelColors.count]).frame(width: 9, height: 9).accessibilityHidden(true)
-                        Text(row.id).fontWeight(.semibold).lineLimit(2).help(row.id)
+                        Text(row.name).fontWeight(.semibold).lineLimit(2).help(row.name)
                     }.frame(minWidth: 70, maxWidth: .infinity, alignment: .leading)
                     Text(row.count).fixedSize().highlightChanges(value: row.count)
-                    Text(row.tokens.map { JSONValue.number($0).display } ?? "—").fontWeight(.medium).fixedSize()
+                    Text(row.tokens.map { JSONValue.number($0).display(locale: language.locale) } ?? "—").fontWeight(.medium).fixedSize()
                         .highlightChanges(value: row.tokens.map { JSONValue.number($0).display })
                     Text(distribution.share(of: row).map { String(format: "%.1f%%", $0 * 100) } ?? "—").fontWeight(.semibold).fixedSize()
                         .highlightChanges(value: distribution.share(of: row).map { String(format: "%.1f", $0 * 100) })

@@ -46,7 +46,7 @@ enum LimitFormatting {
     static func balance(_ value: JSONValue, language: Language) -> String {
         guard let number = value.number ?? Double(value.text), number.isFinite else { return "—" }
         return number.formatted(.number.precision(.fractionLength(0...2))
-            .locale(Locale(identifier: language == .zh ? "zh_CN" : "en_GB")))
+            .locale(language.locale))
     }
 
     static func duration(_ seconds: Double?, language: Language) -> String {

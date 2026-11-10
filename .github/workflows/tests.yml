@@ -40,8 +40,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
+      - name: Select full Xcode
+        run: |
+          source scripts/xcode_env.sh
+          echo "DEVELOPER_DIR=$DEVELOPER_DIR" >> "$GITHUB_ENV"
       - name: Native app and pipe integration tests
-        run: swift test --package-path macOS
+        run: swift test --package-path macOS --scratch-path .build/swift
         env:
           USAGE_PYTHON: ${{ env.pythonLocation }}/bin/python3
       - name: Build self-contained app
@@ -50,3 +54,10 @@ jobs:
       - name: Validate bundled helper
         if: matrix.python == '3.14'
         run: python3 scripts/check_bundle.py dist/Usage.app
+      - name: Verify build-mode cleanup
+        if: matrix.python == '3.14'
+        run: |
+          ./scripts/build_macos.sh --development
+          python3 scripts/check_bundle.py dist/Usage.app --development
+          ./scripts/build_macos.sh
+          python3 scripts/check_bundle.py dist/Usage.app

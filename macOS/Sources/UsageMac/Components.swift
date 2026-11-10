@@ -113,7 +113,7 @@ struct LimitMeter: View {
 }
 
 struct TabularRow: Identifiable {
-    let id: String
+    let id: OccurrenceID
     let cells: [String]
 }
 
@@ -147,22 +147,23 @@ struct RecordTable: View {
     }
 }
 
-func rows(_ items: [JSONValue], identity: String, keys: [String]) -> [TabularRow] {
-    // Duplicate upstream identities retain deterministic occurrence IDs.
-    var occurrences: [String: Int] = [:]
-    return items.map { item in
-        let key = item[identity].display
-        let occurrence = occurrences[key, default: 0]
-        occurrences[key] = occurrence + 1
-        return TabularRow(id: "\(key)#\(occurrence)", cells: keys.map { path in
-            path.split(separator: ".").reduce(item) { $0[String($1)] }.display
+func rows(_ items: [JSONValue], identity: String, keys: [String], language: Language) -> [TabularRow] {
+    identifiedValues(items, key: { $0[identity].display }).map { entry in
+        TabularRow(id: entry.id, cells: keys.map { path in
+            path.split(separator: ".").reduce(entry.value) { $0[String($1)] }.display(locale: language.locale)
         })
+    }
+}
+
+func arrayRows(_ items: [JSONValue], language: Language) -> [TabularRow] {
+    identifiedValues(items, key: { $0.items.map(\.display).joined(separator: "|") }).map { entry in
+        TabularRow(id: entry.id, cells: entry.value.items.map { $0.display(locale: language.locale) })
     }
 }
 
 func dateText(_ date: Date, language: Language) -> String {
     date.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened)
-        .locale(Locale(identifier: language == .zh ? "zh_CN" : "en_GB")))
+        .locale(language.locale))
 }
 
 func localDate(_ value: JSONValue, language: Language) -> String {
@@ -170,7 +171,7 @@ func localDate(_ value: JSONValue, language: Language) -> String {
     let formatter = ISO8601DateFormatter()
     formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
     let date = formatter.date(from: value.text) ?? ISO8601DateFormatter().date(from: value.text)
-    return date.map { dateText($0, language: language) } ?? value.display
+    return date.map { dateText($0, language: language) } ?? value.display(locale: language.locale)
 }
 
 struct SourceSection<Content: View>: View {

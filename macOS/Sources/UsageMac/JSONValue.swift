@@ -3,12 +3,13 @@ import Foundation
 /// Preserve the collectors' report contracts while upstream optional fields evolve.
 enum JSONValue: Codable, Equatable, Sendable {
     case object([String: JSONValue]), array([JSONValue]), string(String)
-    case number(Double), bool(Bool), null
+    case integer(Int), number(Double), bool(Bool), null
 
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
         if container.decodeNil() { self = .null }
         else if let value = try? container.decode(Bool.self) { self = .bool(value) }
+        else if let value = try? container.decode(Int.self) { self = .integer(value) }
         else if let value = try? container.decode(Double.self) { self = .number(value) }
         else if let value = try? container.decode(String.self) { self = .string(value) }
         else if let value = try? container.decode([JSONValue].self) { self = .array(value) }
@@ -21,6 +22,7 @@ enum JSONValue: Codable, Equatable, Sendable {
         case .object(let value): try container.encode(value)
         case .array(let value): try container.encode(value)
         case .string(let value): try container.encode(value)
+        case .integer(let value): try container.encode(value)
         case .number(let value): try container.encode(value)
         case .bool(let value): try container.encode(value)
         case .null: try container.encodeNil()
@@ -34,14 +36,23 @@ enum JSONValue: Codable, Equatable, Sendable {
     var items: [JSONValue] { if case .array(let value) = self { return value }; return [] }
     var object: [String: JSONValue] { if case .object(let value) = self { return value }; return [:] }
     var text: String { if case .string(let value) = self { return value }; return "" }
-    var number: Double? { if case .number(let value) = self { return value }; return nil }
+    var number: Double? {
+        switch self {
+        case .integer(let value): return Double(value)
+        case .number(let value): return value
+        default: return nil
+        }
+    }
     var flag: Bool? { if case .bool(let value) = self { return value }; return nil }
-    var display: String {
+    // Identity/error fallbacks stay deterministic; UI callers supply the chosen language's locale.
+    var display: String { display(locale: Locale(identifier: "en_GB")) }
+    func display(locale: Locale) -> String {
         switch self {
         case .string(let value): return value.isEmpty ? "—" : value
-        case .number(let value): return value.formatted(.number.precision(.fractionLength(0...2)))
+        case .integer(let value): return value.formatted(.number.locale(locale))
+        case .number(let value): return value.formatted(.number.precision(.fractionLength(0...2)).locale(locale))
         case .bool(let value): return value ? "✓" : "—"
-        case .array(let value): return value.map(\.display).joined(separator: ", ")
+        case .array(let value): return value.map { $0.display(locale: locale) }.joined(separator: ", ")
         default: return "—"
         }
     }

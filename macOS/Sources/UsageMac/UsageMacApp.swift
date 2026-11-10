@@ -4,6 +4,11 @@ import SwiftUI
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     static weak var model: DashboardModel?
+    static func startCollectors(_ model: DashboardModel) {
+        Self.model = model
+        // Collection belongs to the app, so closing its window must not cancel startup.
+        Task { await model.start() }
+    }
     func applicationWillTerminate(_ notification: Notification) { Self.model?.stop() }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 }
@@ -12,13 +17,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 struct UsageMacApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @State private var model = DashboardModel()
-    init() { signal(SIGPIPE, SIG_IGN) }
     var body: some Scene {
         Window("Usage", id: "dashboard") {
             DashboardView(model: model)
                 .modifier(DashboardAppearance())
-                .environment(\.locale, Locale(identifier: model.language == .zh ? "zh_CN" : "en_GB"))
-                .onAppear { AppDelegate.model = model }
+                .environment(\.locale, model.language.locale)
+                .onAppear { AppDelegate.startCollectors(model) }
         }
         .defaultSize(width: 1120, height: 800)
         .commands {
@@ -55,8 +59,12 @@ struct UsageMenu: View {
             weeklyUsed: model.reports[.claude]?["rate_limits"]["seven_day"]["used_percentage"].number, language: language) {
             Text(summary)
         }
-        if model.needsReconnect {
+        if model.connecting {
+            Text(language.text("Connecting…", "正在连接…"))
+        } else if model.needsReconnect {
             Text(language.text("Collector disconnected", "采集器已断开"))
+        }
+        if model.offersReconnect {
             Button(language.text("Reconnect", "重新连接")) { Task { await model.reconnect() } }
                 .disabled(model.connecting)
         }

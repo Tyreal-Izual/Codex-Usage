@@ -7,7 +7,7 @@ sessions, with Isambard status and Codex Radar. **macOS 14.4+ only.**
 
 ## Build and open
 
-Requires Xcode 15.3+ (or compatible Command Line Tools) and Python 3.10+ to build.
+Requires full Xcode 15.3+ and Python 3.10+ to build; standalone Command Line Tools are insufficient.
 Quit Usage with `⌘Q`, then run from the checkout root:
 
 ```sh
@@ -31,7 +31,7 @@ credit-expiry hints. Headers wrap as needed, and changed numbers briefly highlig
 - **Back to limits**: align Codex limits with the top; startup does this once after
   loading. Later refreshes preserve your scroll position.
 - **Refresh (`⌘R`)**: collect according to source caches; Radar syncs every four hours.
-  A disconnected collector exposes **Reconnect** in the toolbar and menu bar.
+  **Reconnect** is available in the toolbar and menu bar during collection or after a disconnect.
 - **Export**: save the current reports, update times and errors as JSON.
 - **Menu bar**: remaining quota with its window; falls back to weekly when needed.
   Closing the window keeps the app running; `⌘Q` quits.

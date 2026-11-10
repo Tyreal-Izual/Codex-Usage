@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 @MainActor
 protocol CollectorConnection: AnyObject {
@@ -20,8 +21,14 @@ final class CollectorClient: CollectorConnection {
     private var pending: [Int: CheckedContinuation<JSONValue, Error>] = [:]
     private var timeouts: [Int: Task<Void, Never>] = [:]
     private let environmentOverrides: [String: String]
+    private let reportTimeout: Duration
+    private static let ignoreBrokenPipe: Void = { _ = signal(SIGPIPE, SIG_IGN) }()
 
-    init(environment: [String: String] = [:]) { environmentOverrides = environment }
+    init(environment: [String: String] = [:], reportTimeout: Duration = .seconds(120)) {
+        environmentOverrides = environment
+        self.reportTimeout = reportTimeout
+        _ = Self.ignoreBrokenPipe
+    }
 
     func start() throws {
         guard process?.isRunning != true else { return }
@@ -91,16 +98,18 @@ final class CollectorClient: CollectorConnection {
         let id = nextID
         var payload = values
         payload["action"] = .string(action)
-        payload["id"] = .number(Double(id))
+        payload["id"] = .integer(id)
         var data = try JSONEncoder().encode(JSONValue.object(payload))
         data.append(0x0A)
+        let timeout = action == "report" ? reportTimeout : .seconds(15)
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 pending[id] = continuation
                 timeouts[id] = Task { [weak self] in
-                    do { try await Task.sleep(for: .seconds(action == "report" ? 540 : 15)) }
+                    do { try await Task.sleep(for: timeout) }
                     catch { return }
-                    self?.finish(id, result: .failure(BridgeError.message("Collection timed out. Try Reconnect.")))
+                    guard let self, self.pending[id] != nil else { return }
+                    self.disconnected("Collection timed out. Reconnect to try again.")
                 }
                 do { try input.write(contentsOf: data) }
                 catch { disconnected("Collector connection failed: \(error.localizedDescription)") }

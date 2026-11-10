@@ -34,19 +34,19 @@ struct ResetCredits: View {
         let retrieved = LimitFormatting.retrievedAt(data)
         return [
             PanelFact(id: "available", label: language.text("Available", "可用"),
-                      value: details.availableCount.map { JSONValue.number($0).display } ?? "—",
+                      value: details.availableCount.map { JSONValue.number($0).display(locale: language.locale) } ?? "—",
                       tone: (details.availableCount ?? 0) > 0 ? .good : .normal,
                       help: language.text("Count reported by Codex at the last update", "Codex 在上次更新时返回的可用数量"), tracksChanges: true),
             PanelFact(id: "soon", label: language.text("Expiring soon", "即将到期"),
                       value: details.hasCreditList ? String(details.expiringSoonCount) : "—",
                       tone: details.expiringSoonCount > 0 ? .warning : .normal,
-                      help: language.text("Available credits expiring within 7 days", "七天内到期的可用额度"), tracksChanges: true),
+                      help: language.text("Available credits expiring within 7 days", "七天内到期的可用额度")),
             PanelFact(id: "updated", label: language.text("Updated", "更新于"),
                       value: LimitFormatting.age(since: retrieved, now: now, language: language)),
             PanelFact(id: "records", label: language.text("Records", "记录"),
                       value: details.hasCreditList ? String(details.credits.count) : "—", tracksChanges: true),
             PanelFact(id: "earned", label: language.text("Total earned", "累计获得"),
-                      value: details.totalEarnedCount.map { JSONValue.number($0).display } ?? "—", tracksChanges: true)
+                      value: details.totalEarnedCount.map { JSONValue.number($0).display(locale: language.locale) } ?? "—", tracksChanges: true)
         ]
     }
 }
@@ -81,7 +81,7 @@ private struct ResetCreditStatus: View {
             .padding(.horizontal, 9).padding(.vertical, 5)
             .background(credit.state.color.opacity(0.1), in: Capsule())
             .overlay { Capsule().strokeBorder(credit.state.color.opacity(0.25)) }
-            .help(language.text("Reported status: ", "服务端状态：") + credit.data["status"].display)
+            .help(language.text("Reported status: ", "服务端状态：") + credit.data["status"].display(locale: language.locale))
     }
 }
 
@@ -90,9 +90,9 @@ private struct ResetCreditDate: View {
     let fallback: JSONValue
     let language: Language
     var body: some View {
-        Text(date.map { dateText($0, language: language) } ?? fallback.display)
+        Text(date.map { dateText($0, language: language) } ?? fallback.display(locale: language.locale))
             .monospacedDigit()
-            .help(fallback.text.isEmpty ? date.map { $0.ISO8601Format() } ?? "—" : fallback.display)
+            .help(fallback.text.isEmpty ? date.map { $0.ISO8601Format() } ?? "—" : fallback.display(locale: language.locale))
     }
 }
 
@@ -115,7 +115,7 @@ private struct ResetCreditsTable: View {
                     HStack(spacing: 8) {
                         Text(String(format: "%02d", index + 1)).foregroundStyle(DashboardTheme.muted).monospacedDigit()
                         Text(credit.title(language)).fontWeight(.bold)
-                    }.frame(minWidth: 110, maxWidth: .infinity, alignment: .leading).help(credit.data["reset_type"].display)
+                    }.frame(minWidth: 110, maxWidth: .infinity, alignment: .leading).help(credit.data["reset_type"].display(locale: language.locale))
                     ResetCreditStatus(credit: credit, language: language).fixedSize()
                         .frame(minWidth: 120, maxWidth: .infinity, alignment: .leading)
                     Text(credit.timeRemaining(now: now, language: language))

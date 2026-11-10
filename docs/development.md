@@ -18,9 +18,13 @@
 SwiftUI owns a persistent Python helper and communicates over stdin/stdout, with no
 HTTP listener or WebView. Sources return independently; source changes invalidate old
 replies. EOF, process exit and invalid responses close the helper session, fail pending
-requests and expose Reconnect in the toolbar/menu; refresh stays disabled until recovery.
+requests and expose Reconnect in the toolbar/menu. Reconnect is also available while
+collecting, so a stalled request can be interrupted. Reports time out after 120 seconds;
+control requests after 15 seconds. A timeout closes the session and requires reconnect.
 Intentional shutdown is silent. Radar owns a separate worker. UI preferences persist
 in UserDefaults; source edits during connection are applied before the initial refresh.
+Startup outlives the window, and changing the polling interval reschedules it immediately.
+Request IDs, `days` and `top` use explicit JSON integers on the private wire.
 
 ## Configuration
 
@@ -56,7 +60,7 @@ History-size edits coalesce for 300 ms and refresh only local, Claude and enable
 Admin reports; they do not reconfigure sources or refresh online/public reports.
 Reset credits prioritize active entries by expiry and highlight those due within
 seven days. Counts remain server-reported; expiry cues follow the Mac's clock.
-Changed limit percentages, model counts/tokens/shares, credit counts/balance and
+Changed limit percentages, model counts/tokens/shares, server credit counts/balance and
 Radar scores highlight for four seconds. Initial data and clock ticks do not flash;
 Reduce Motion disables the pulse.
 
@@ -68,7 +72,8 @@ Run checks from the checkout root:
 
 ```sh
 python3 -B -m unittest discover -v
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun swift test --package-path macOS --scratch-path .build/swift
+source scripts/xcode_env.sh
+xcrun swift test --package-path macOS --scratch-path .build/swift
 ./scripts/build_macos.sh
 python3 -B scripts/check_bundle.py dist/Usage.app
 codesign --verify --deep --strict dist/Usage.app
@@ -76,11 +81,12 @@ open dist/Usage.app --args --demo
 ```
 
 Development builds require the checkout and selected Python; release builds bundle
-Python. The script selects `/Applications/Xcode.app` when available. Adjust
-`DEVELOPER_DIR` for another Xcode location, or omit it when the selected Command
-Line Tools compiler and SDK already match.
+Python. Switching build modes replaces the helper directory completely. Native builds
+and tests require full Xcode; standalone Command Line Tools lack the SwiftUI macro
+plugins. `scripts/xcode_env.sh` selects Xcode and exports `DEVELOPER_DIR`; set that
+variable explicitly for another Xcode installation.
 
-CI is configured for Python 3.10/3.14 on Linux, macOS and Windows for the shared
+CI runs Python 3.10/3.14 on Linux, macOS and Windows for the shared
 collectors and legacy web/CLI. Swift tests and app packaging run only on macOS. Python tests require
 loopback access and Node; CI rejects skipped tests. TLS tests use a public, untrusted
 fixture certificate without requiring an external OpenSSL executable. Swift tests cover

@@ -5,6 +5,7 @@ enum Language: String, CaseIterable, Identifiable {
     case en, zh
     var id: String { rawValue }
     var label: String { self == .zh ? "中文" : "English" }
+    var locale: Locale { Locale(identifier: self == .zh ? "zh_CN" : "en_GB") }
     func text(_ english: String, _ chinese: String) -> String { self == .zh ? chinese : english }
 }
 
@@ -51,8 +52,8 @@ enum Destination: String, CaseIterable, Identifiable {
 final class DashboardModel {
     var language: Language { didSet { save(language.rawValue, "language") } }
     var days: Int { didSet { if days != oldValue { save(days, "days"); historyChanged() } } }
-    var interval: Int { didSet { save(interval, "interval") } }
-    var automatic: Bool { didSet { save(automatic, "automatic") } }
+    var interval: Int { didSet { if interval != oldValue { save(interval, "interval"); restartPolling() } } }
+    var automatic: Bool { didSet { if automatic != oldValue { save(automatic, "automatic"); restartPolling() } } }
     var sources: Set<String> { didSet { save(Array(sources).sorted(), "sources"); configurationChanged() } }
     var reports: [Report: JSONValue] = [:]
     var errors: [Report: String] = [:]
@@ -92,7 +93,8 @@ final class DashboardModel {
     }
 
     var canRefresh: Bool { connected && !connecting && pending.isEmpty && !demo }
-    var needsReconnect: Bool { !connected && connectionError != nil && !demo }
+    var needsReconnect: Bool { !connected && !connecting && !demo }
+    var offersReconnect: Bool { !demo && !connecting && (needsReconnect || !pending.isEmpty) }
 
     var isambardEnabled: Bool {
         get { sources.contains("isambard") }
@@ -141,6 +143,21 @@ final class DashboardModel {
         }
     }
 
+    private func restartPolling() {
+        timer?.cancel()
+        timer = nil
+        guard connected && !connecting && automatic && !demo else { return }
+        let delay = Duration.seconds(interval)
+        timer = Task { [weak self] in
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: delay) }
+                catch { return }
+                guard let self, self.connected, !Task.isCancelled else { return }
+                self.refresh()
+            }
+        }
+    }
+
     func start() async {
         guard !connected && !connecting else { return }
         if demo {
@@ -153,7 +170,12 @@ final class DashboardModel {
         let session = UUID()
         connectionID = session
         connecting = true
-        defer { if connectionID == session { connecting = false } }
+        defer {
+            if connectionID == session {
+                connecting = false
+                restartPolling()
+            }
+        }
         do {
             try client.start()
             let hello = try await client.request("hello", values: [:])
@@ -169,14 +191,6 @@ final class DashboardModel {
             await configure()
             guard connectionID == session, connected else { return }
             try Task.checkCancellation()
-            timer = Task { [weak self] in
-                while !Task.isCancelled {
-                    do { try await Task.sleep(for: .seconds(self?.interval ?? 15)) }
-                    catch { return }
-                    guard let self else { return }
-                    if self.automatic { self.refresh() }
-                }
-            }
         } catch {
             guard connectionID == session else { return }
             stop()
@@ -236,8 +250,8 @@ final class DashboardModel {
                 }
                 do {
                     let value = try await self.client.request(report == .radar ? "radar" : "report", values: [
-                        "report": .string(report.rawValue), "days": .number(Double(requestedDays)),
-                        "top": .number(20), "force": .bool(force)
+                        "report": .string(report.rawValue), "days": .integer(requestedDays),
+                        "top": .integer(20), "force": .bool(force)
                     ])
                     guard self.revision == current, self.requestIDs[report] == requestID, !Task.isCancelled else { return }
                     let data = report == .radar ? value : value["data"]
