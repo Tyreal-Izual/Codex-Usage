@@ -65,6 +65,24 @@ enum DemoData {
         reports[.radar] = .object(["available": .bool(true), "fetched_at": .string("2026-11-05T12:00:00Z"),
                                   "next_attempt_at": .string("2026-11-05T16:00:00Z"),
                                   "data": .object(["points": .array(points), "source_started_at": .string("2026-11-05T10:00:00Z"), "source_updated_at": .string("2026-11-05T11:00:00Z")])])
+        // Calendar-relative fixtures keep Daily Tokens useful whenever demo mode is opened.
+        let calendar = DailyTokenSeries.localCalendar
+        for (report, key, scale) in [(Report.local, "sessions", 1_000_000), (.claude, "local_usage", 100_000)] {
+            var data = reports[report]!.object
+            var local = data[key]!.object
+            let rows = (0..<40).map { offset -> JSONValue in
+                let date = calendar.date(byAdding: .day, value: offset - 39, to: Date())!
+                let c = calendar.dateComponents([.year, .month, .day], from: date)
+                let total = offset % 9 == 0 ? 0 : (offset % 7 + 1) * scale
+                return .object(["date": .string(String(format: "%04d-%02d-%02d", c.year!, c.month!, c.day!)),
+                                "total_tokens": .integer(total), "input_tokens": .integer(total * 9 / 10),
+                                "output_tokens": .integer(total / 10)])
+            }
+            local["daily_tokens"] = .object(["days": .array(rows), "unknown_date_tokens": .integer(0)])
+            local["daily_usage"] = .array(Array(rows.suffix(30)))
+            data[key] = .object(local)
+            reports[report] = .object(data)
+        }
         return reports
     }()
 }

@@ -9,7 +9,7 @@
 | `macOS/Sources/UsageMac/` | SwiftUI scenes, layouts/theme, observable state, limit presentation and helper client |
 | `native_backend.py` | Private JSON-lines dispatcher: request IDs, two workers, eight outstanding reports |
 | `usage_reports.py`, `usage_sources.py`, `usage_common.py` | Report composition, source caches, paths, atomic writes and verified TLS |
-| `codex_usage.py`, `claude_usage.py` | Local/online collectors and token aggregation |
+| `codex_usage.py`, `claude_usage.py`, `token_history.py` | Local/online collectors and token-event accounting |
 | `codex_radar.py`, `isambard_status.py` | Public-source collection and disk caches |
 | `claude_usage_statusline.py`, `claude_usage_refresher.py` | Optional Claude snapshot capture and scheduling |
 | `scripts/` | App packaging, icon generation and bundle verification |
@@ -57,7 +57,7 @@ preferences, local sources are auto-detected and Isambard/Radar are enabled.
 | Radar | Independent four-hour worker; [retry and validation rules](radar.md) |
 
 The refresh preference controls polling, not upstream cache expiry. History rows
-limit local daily tables; local totals remain historical. Admin API uses the same
+limit local daily tables; local totals and the Daily Tokens range remain independent. Admin API uses the same
 value as its lookback in days. Limit countdowns and snapshot age update without a
 fetch. Missing values, false and zero stay distinct.
 History-size edits coalesce for 300 ms and refresh only local, Claude and enabled
@@ -106,11 +106,23 @@ export and quit cleanup. Public signing/notarization and automatic updates remai
 
 ## Data boundaries
 
-Codex daily totals are grouped by session start date, not per-event consumption.
-Session totals use JSONL logs; model totals use SQLite threads and can differ.
-Native model lists show the top 20 entries; their totals and shares use those entries.
+Daily Tokens groups deduplicated usage events by the Mac's local calendar day,
+including zero-usage days. The range includes today; all-history charts combine
+consecutive dates into at most 60 bars without dropping tokens. `daily_tokens`
+retains the complete dated history and an undated total; `daily_usage` keeps the
+legacy row limit. Undated tokens stay in historical totals but are excluded from
+charts and shown separately. These are local recorded tokens, not account billing.
+
+Codex reads `sessions/` and `archived_sessions/`. Per-response usage is reconciled
+with legacy cumulative differences, including counter resets and copied records;
+unexplained initial baselines retain unknown dates. Cached input and reasoning are
+already included in input/output and are not added again. The parser follows
+[PulseDeck's accounting](https://github.com/Tyreal-Izual/PulseDeck/blob/main/docs/local-usage.md).
+Codex model cards still use SQLite thread totals and can differ from event history;
+native model lists show the top 20 entries, with totals/shares based on those entries.
 
 Claude counts each message/request identity once across files, retaining the snapshot
-with the greatest total usage (latest timestamp breaks ties). Counters from duplicate
-snapshots are not added together. Project grouping uses complete paths. File caches
-track identity/change time as well as size/mtime; failed reads are retried, not cached.
+with the greatest total usage and the earliest known timestamp. Input, output,
+cache creation and cache read form its total; duplicate snapshots are never added.
+Project grouping uses complete paths. File caches track identity/change time as well
+as size/mtime; failed reads are retried, not cached.

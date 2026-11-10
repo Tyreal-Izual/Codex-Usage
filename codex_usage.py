@@ -20,6 +20,7 @@ or secrets.
 from __future__ import annotations
 
 from usage_common import CollectionError, export_directory, ssl_context
+from token_history import CodexParser, daily_history, merge_usage_records
 import threading
 import argparse
 import contextlib
@@ -823,19 +824,7 @@ def sqlite_threads_summary(codex_home: Path, top_n: int) -> dict[str, Any]:
     return {"selected": selected, "all": summaries}
 
 
-def session_date_from_path(path: Path) -> str | None:
-    parts = path.parts
-    try:
-        idx = parts.index("sessions")
-        year, month, day = parts[idx + 1], parts[idx + 2], parts[idx + 3]
-        if len(year) == 4 and len(month) == 2 and len(day) == 2:
-            return f"{year}-{month}-{day}"
-    except (ValueError, IndexError):
-        return None
-    return None
-
-
-_SESSION_CACHE: dict[str, tuple[tuple[int, int, int], dict[str, Any]]] = {}
+_SESSION_CACHE: dict[str, tuple[tuple[int, int, int, int], dict[str, Any]]] = {}
 _SESSION_CACHE_LOCK = threading.Lock()
 
 
@@ -843,11 +832,8 @@ def scan_session_file(file_path: Path) -> dict[str, Any]:
     """Parse one transcript; unchanged files reuse only usage metadata."""
     lines_seen = parse_errors = 0
     read_failed = False
-    final_usage: dict[str, int] | None = None
-    model: str | None = None
-    provider: str | None = None
     context_window: int | None = None
-    project: str | None = None
+    parser = CodexParser(file_path)
 
     try:
         with file_path.open("r", encoding="utf-8", errors="replace") as handle:
@@ -860,6 +846,7 @@ def scan_session_file(file_path: Path) -> dict[str, Any]:
                     continue
                 if not isinstance(obj, dict):
                     continue
+                parser.consume(obj)
                 payload = (
                     obj.get("payload")
                     if isinstance(obj.get("payload"), dict)
@@ -868,36 +855,18 @@ def scan_session_file(file_path: Path) -> dict[str, Any]:
                 if not isinstance(payload, dict):
                     continue
 
-                if isinstance(payload.get("model"), str):
-                    model = payload["model"]
-                if isinstance(payload.get("model_provider"), str):
-                    provider = payload["model_provider"]
-                if isinstance(payload.get("cwd"), str):
-                    project = payload["cwd"]
-
                 info = payload.get("info")
-                if isinstance(info, dict):
-                    total_usage = info.get("total_token_usage")
-                    if isinstance(total_usage, dict):
-                        parsed_usage = {
-                            key: int(total_usage.get(key) or 0)
-                            for key in USAGE_FIELDS
-                            if isinstance(total_usage.get(key), (int, float))
-                            and not isinstance(total_usage.get(key), bool)
-                            and math.isfinite(total_usage[key])
-                            and total_usage[key] >= 0
-                        }
-                        if parsed_usage:
-                            final_usage = parsed_usage
-                    if isinstance(info.get("model_context_window"), int):
-                        context_window = int(info["model_context_window"])
+                if isinstance(info, dict) and isinstance(info.get("model_context_window"), int):
+                    context_window = int(info["model_context_window"])
     except OSError:
         parse_errors += 1
         read_failed = True
 
 
-    return dict(final_usage=final_usage, model=model, provider=provider,
-                context_window=context_window, project=project, lines_seen=lines_seen,
+    records, resets = parser.records()
+    return dict(records=records, counter_resets=resets,
+                duplicates=parser.duplicates + parser.paired_duplicates, provider=parser.provider,
+                context_window=context_window, lines_seen=lines_seen,
                 parse_errors=parse_errors, read_failed=read_failed)
 
 
@@ -905,7 +874,7 @@ def cached_session_file(file_path: Path) -> dict[str, Any]:
     with _SESSION_CACHE_LOCK:
         try:
             stat = file_path.stat()
-            signature = (stat.st_mtime_ns, stat.st_size, stat.st_ino)
+            signature = (stat.st_mtime_ns, stat.st_ctime_ns, stat.st_size, stat.st_ino)
         except OSError:
             return scan_session_file(file_path)
         key = str(file_path)
@@ -919,99 +888,74 @@ def cached_session_file(file_path: Path) -> dict[str, Any]:
 
 
 def scan_sessions_metadata(codex_home: Path, top_n: int = 10) -> dict[str, Any]:
-    session_dir = codex_home.resolve() / "sessions"
     codex_home = codex_home.resolve()
-    files = sorted(session_dir.rglob("*.jsonl")) if session_dir.exists() else []
+    roots = [codex_home / name for name in ("sessions", "archived_sessions")]
+    files = sorted(path for root in roots if root.exists() for path in root.rglob("*.jsonl"))
     live = {str(path) for path in files}
     with _SESSION_CACHE_LOCK:
         for key in list(_SESSION_CACHE):
-            if Path(key).is_relative_to(session_dir) and key not in live:
+            if any(Path(key).is_relative_to(root) for root in roots) and key not in live:
                 del _SESSION_CACHE[key]
-    daily_sessions: Counter[str] = Counter()
-    daily_usage: dict[str, Counter[str]] = defaultdict(Counter)
-    model_sessions: Counter[str] = Counter()
-    model_usage: dict[str, Counter[str]] = defaultdict(Counter)
+    unique: dict[str, dict[str, Any]] = {}
     provider_sessions: Counter[str] = Counter()
     context_windows: Counter[str] = Counter()
-    final_totals: list[dict[str, Any]] = []
-    final_sum: Counter[str] = Counter()
-    parse_errors = 0
-    lines_seen = 0
-    files_with_usage = 0
+    parse_errors = lines_seen = files_with_usage = duplicates = resets = 0
     mtime_values: list[datetime] = []
-
     for file_path in files:
-        date_key = session_date_from_path(file_path) or "unknown"
-        daily_sessions[date_key] += 1
         try:
-            mtime_values.append(
-                datetime.fromtimestamp(file_path.stat().st_mtime).astimezone()
-            )
+            mtime_values.append(datetime.fromtimestamp(file_path.stat().st_mtime).astimezone())
         except OSError:
             pass
-
         scanned = cached_session_file(file_path)
         lines_seen += scanned["lines_seen"]
         parse_errors += scanned["parse_errors"]
         if scanned["read_failed"]:
             continue
-        final_usage = scanned["final_usage"]
-        model, provider = scanned["model"], scanned["provider"]
-        context_window, project = scanned["context_window"], scanned["project"]
+        if scanned["provider"]:
+            provider_sessions[scanned["provider"]] += 1
+        if scanned["context_window"] is not None:
+            context_windows[str(scanned["context_window"])] += 1
+        files_with_usage += bool(scanned["records"])
+        duplicates += scanned["duplicates"]
+        resets += scanned["counter_resets"]
+        for record in scanned["records"]:
+            previous = unique.get(record["key"])
+            if previous is not None:
+                duplicates += 1
+                record = merge_usage_records(previous, record)
+            unique[record["key"]] = record
 
-        if model:
-            model_sessions[model] += 1
-        if provider:
-            provider_sessions[provider] += 1
-        if context_window is not None:
-            context_windows[str(context_window)] += 1
-        if final_usage:
-            files_with_usage += 1
-            for key, value in final_usage.items():
-                final_sum[key] += value
-                daily_usage[date_key][key] += value
-                if model:
-                    model_usage[model][key] += value
-            final_totals.append(
-                {
-                    "session_file": str(file_path.relative_to(codex_home)),
-                    "date": date_key,
-                    "model": model or "—",
-                    "project": short_path(project),
-                    "usage": final_usage,
-                }
-            )
-
-    final_totals.sort(
-        key=lambda item: item["usage"].get("total_tokens", 0), reverse=True
-    )
-    daily_usage_rows = []
-    for day in sorted(daily_sessions):
-        row = {"date": day, "sessions": daily_sessions[day]}
-        row.update(
-            {field: int(daily_usage[day].get(field, 0)) for field in USAGE_FIELDS}
-        )
-        daily_usage_rows.append(row)
-
+    totals: Counter[str] = Counter()
+    model_usage: dict[str, Counter[str]] = defaultdict(Counter)
+    model_sessions: dict[str, set[str]] = defaultdict(set)
+    sessions: dict[str, dict[str, Any]] = {}
+    for record in unique.values():
+        usage, model, session = record["usage"], record["model"], record["session"]
+        totals.update(usage)
+        model_usage[model].update(usage)
+        model_sessions[model].add(session)
+        row = sessions.setdefault(session, {
+            "session_file": str(Path(record["file"]).relative_to(codex_home)),
+            "date": "unknown", "model": model, "project": short_path(record["project"]),
+            "usage": Counter(),
+        })
+        row["usage"].update(usage)
+        if record["timestamp"] is not None:
+            row["date"] = record["timestamp"].astimezone().date().isoformat()
+    history = daily_history(unique.values())
+    final_totals = sorted(sessions.values(), key=lambda row: row["usage"]["total_tokens"], reverse=True)
     return {
-        "session_files": len(files),
-        "jsonl_lines_scanned": lines_seen,
-        "parse_or_read_errors": parse_errors,
-        "files_with_final_token_totals": files_with_usage,
-        "file_mtime_start_local": min(mtime_values).strftime("%Y-%m-%d %H:%M:%S %Z %z")
-        if mtime_values
-        else None,
-        "file_mtime_end_local": max(mtime_values).strftime("%Y-%m-%d %H:%M:%S %Z %z")
-        if mtime_values
-        else None,
-        "final_token_totals_sum": dict(final_sum),
-        "models_by_session": model_sessions.most_common(top_n),
-        "model_token_totals": {
-            model: dict(counter) for model, counter in model_usage.items()
-        },
+        "session_files": len(files), "jsonl_lines_scanned": lines_seen,
+        "parse_or_read_errors": parse_errors, "files_with_final_token_totals": files_with_usage,
+        "duplicate_usage_records_skipped": duplicates, "counter_resets": resets,
+        "file_mtime_start_local": min(mtime_values).strftime("%Y-%m-%d %H:%M:%S %Z %z") if mtime_values else None,
+        "file_mtime_end_local": max(mtime_values).strftime("%Y-%m-%d %H:%M:%S %Z %z") if mtime_values else None,
+        "final_token_totals_sum": dict(totals),
+        "models_by_session": sorted(((model, len(ids)) for model, ids in model_sessions.items()), key=lambda row: -row[1])[:top_n],
+        "model_token_totals": {model: dict(counter) for model, counter in model_usage.items()},
         "providers_by_session": provider_sessions.most_common(20),
         "context_windows_by_session": context_windows.most_common(20),
-        "daily_usage": daily_usage_rows,
+        "daily_usage": history["days"], "daily_tokens": history,
         "top_sessions_by_total_tokens": final_totals[:top_n],
     }
 
@@ -1219,7 +1163,7 @@ def print_local_usage(data: dict[str, Any], top: int, days: int) -> None:
         for row in recent_daily
     ]
     explain(
-        "Daily totals show when local Codex activity happened. They are grouped by the session file dates available on this machine."
+        "Daily totals group recorded usage events by local calendar day. Historical tokens without a known date are excluded."
     )
     print_counter_table(
         f"Daily local token totals, last {len(recent_daily)} days",

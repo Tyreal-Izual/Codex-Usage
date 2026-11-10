@@ -40,7 +40,7 @@ struct LocalDetails: View {
                        updatedAt: claude ? local["latest_record_at_unix_ms"].number : data["sqlite_threads"]["selected"]["updated_at_unix_ms"].number,
                        unavailable: !claude && !data["sqlite_threads"]["selected"]["error"].errorText.isEmpty)
             Panel(title: language.text("Daily history", "每日记录"),
-                  subtitle: claude ? "" : language.text("Session totals grouped by session start date", "按会话开始日期汇总的会话累计量")) {
+                  subtitle: language.text("Usage events grouped by local calendar day", "按用量发生的本地自然日汇总")) {
                 RecordTable(headers: [language.text("Date", "日期"), language.text("Sessions", "会话"), "Tokens", language.text("Input", "输入"), language.text("Output", "输出")],
                             rows: rows(local["daily_usage"].items.reversed(), identity: "date", keys: ["date", "sessions", "total_tokens", "input_tokens", "output_tokens"], language: language), language: language)
             }
