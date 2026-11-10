@@ -24,6 +24,8 @@ Timed-out reports keep it available until a later report result or explicit canc
 Reports time out after 120 seconds individually, then share a 15-second `hello` probe
 outside the worker pool. A healthy reply preserves the session and polling; a failed
 probe disconnects it. Control-request timeouts still close the session.
+Request/probe timeouts and the 12-second Reconnect delay use `SuspendingClock`,
+so time spent in system sleep does not count toward these deadlines.
 Helper admission is keyed by report name: repeated polls fail immediately while that
 report is collecting, even if `days`/`top` changed. Worker capacity covers every allowed
 report (currently eight), so slow network reports cannot fill the local/Claude slots.

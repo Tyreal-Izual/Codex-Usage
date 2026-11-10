@@ -110,7 +110,8 @@ final class CollectorClient: CollectorConnection {
             try await withCheckedThrowingContinuation { continuation in
                 pending[id] = continuation
                 timeouts[id] = Task { [weak self] in
-                    do { try await Task.sleep(for: timeout) }
+                    // System sleep must not consume a report or health-probe timeout.
+                    do { try await Task.sleep(for: timeout, clock: .suspending) }
                     catch { return }
                     guard let self, self.pending[id] != nil else { return }
                     if action == "report" {

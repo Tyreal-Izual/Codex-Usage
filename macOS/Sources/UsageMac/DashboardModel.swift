@@ -70,7 +70,7 @@ final class DashboardModel {
     @ObservationIgnored private let client: any CollectorConnection
     @ObservationIgnored private var tasks: [Report: Task<Void, Never>] = [:]
     @ObservationIgnored private var requestIDs: [Report: UUID] = [:]
-    @ObservationIgnored private var reconnectDeadlines: [Report: ContinuousClock.Instant] = [:]
+    @ObservationIgnored private var reconnectDeadlines: [Report: SuspendingClock.Instant] = [:]
     @ObservationIgnored private var timedOutReports: Set<Report> = []
     @ObservationIgnored private var slowCollectionCheck: Task<Void, Never>?
     @ObservationIgnored private var timer: Task<Void, Never>?
@@ -141,7 +141,7 @@ final class DashboardModel {
     private func updateSlowCollection() {
         slowCollectionCheck?.cancel()
         slowCollectionCheck = nil
-        let clock = ContinuousClock()
+        let clock = SuspendingClock()
         collectionIsSlow = !timedOutReports.isEmpty || reconnectDeadlines.values.contains { $0 <= clock.now }
         guard !collectionIsSlow, let deadline = reconnectDeadlines.values.min() else { return }
         slowCollectionCheck = Task { [weak self] in
@@ -261,7 +261,7 @@ final class DashboardModel {
             if report == .api && !adminEnabled { continue }
             let requestID = UUID()
             requestIDs[report] = requestID
-            reconnectDeadlines[report] = ContinuousClock().now.advanced(by: reconnectDelay)
+            reconnectDeadlines[report] = SuspendingClock().now.advanced(by: reconnectDelay)
             pending.insert(report)
             tasks[report] = Task { [weak self] in
                 guard let self else { return }
