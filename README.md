@@ -22,12 +22,10 @@ public distribution still needs Developer ID signing and notarization.
 
 ## Use
 
-Overview order: **Limits → Isambard → Daily Tokens → Models → Codex Reset Credits → Radar**.
+Overview order: **Limits → Isambard → Models → Codex Reset Credits → Radar**.
 Codex and Claude limits occupy separate rows; model cards sit side by side when
 space permits. Compact cards show reset countdowns, expandable service details and
 credit-expiry hints. Headers wrap as needed, and changed numbers briefly highlight.
-Daily Tokens shows today's usage and 7-day (default), 30-day or all-history bars;
-hover or focus and use arrow keys for details. Its range is independent of model totals.
 
 - **Settings (`⌘,`)**: sources, English/Chinese, refresh interval and history rows.
 - **Back to limits**: align Codex limits with the top; startup does this once after

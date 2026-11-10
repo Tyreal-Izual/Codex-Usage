@@ -35,13 +35,6 @@ def check(app: Path, *, https: bool = False, development: bool = False) -> None:
         assert trust["certificate_verification"] and trust["hostname_verification"]
         if https:
             assert json.loads(run("--check-https", timeout=40))["ok"]
-        sessions = codex / "sessions"
-        sessions.mkdir()
-        (sessions / "fixture.jsonl").write_text(json.dumps({
-            "type": "token_usage_record", "timestamp": "2026-11-01T12:00:00Z",
-            "payload": {"response_id": "fixture", "usage": {
-                "input_tokens": 12, "output_tokens": 8, "total_tokens": 20}},
-        }) + "\n")
         replies = {r["id"]: r for r in map(json.loads, run("--sources", "codex", payload=(
             '{"id":1,"action":"hello"}\n'
             '{"id":2,"action":"report","report":"local-usage"}\n'
@@ -51,8 +44,6 @@ def check(app: Path, *, https: bool = False, development: bool = False) -> None:
         if development:
             assert not (helper.parent / "_internal").exists(), "Development bundle retained frozen libraries"
         assert replies[2]["result"]["data"]["sqlite_threads"]["selected"]["tokens_used_sum"] == 42
-        history = replies[2]["result"]["data"]["sessions"]["daily_tokens"]
-        assert history["days"][0]["total_tokens"] == 20 and history["unknown_date_tokens"] == 0
         run("--statusline", "--install")
         command = json.loads((claude / "settings.json").read_text())["statusLine"]["command"]
         assert ("claude_usage_statusline.py" if development else "--statusline") in command

@@ -26,7 +26,6 @@ from pathlib import Path
 from typing import Any
 
 from usage_common import resolve_claude_home, resolve_snapshot_path, find_claude_binary
-from token_history import daily_history, timestamp as parse_timestamp
 
 
 TOKEN_FIELDS = (
@@ -45,6 +44,23 @@ CLAUDE_HOME = resolve_claude_home()
 
 def local_now_text() -> str:
     return datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z %z")
+
+
+def parse_timestamp(value: Any) -> datetime | None:
+    if isinstance(value, (int, float)) and math.isfinite(float(value)):
+        try:
+            return datetime.fromtimestamp(float(value), tz=timezone.utc)
+        except (OSError, OverflowError, ValueError):
+            return None
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
 
 
 def local_timestamp_text(value: Any) -> str | None:
@@ -124,14 +140,6 @@ def prefer_usage_record(candidate: dict[str, Any], previous: dict[str, Any]) -> 
     return date is not None and (old_date is None or date > old_date)
 
 
-def merge_usage_record(candidate: dict[str, Any], previous: dict[str, Any]) -> dict[str, Any]:
-    best = candidate if prefer_usage_record(candidate, previous) else previous
-    dates = [date for row in (candidate, previous)
-             if (date := parse_timestamp(row.get("timestamp"))) is not None]
-    stamp = min(dates).isoformat() if dates else None
-    return {**best, "timestamp": stamp, "date": local_date(stamp)}
-
-
 def scan_file(file_path: Path, claude_home: Path) -> dict[str, Any]:
     records: dict[str, dict[str, Any]] = {}
     lines_seen = 0
@@ -178,7 +186,8 @@ def scan_file(file_path: Path, claude_home: Path) -> dict[str, Any]:
                 previous = records.get(key)
                 if previous is not None:
                     duplicate_rows += 1
-                    record = merge_usage_record(record, previous)
+                    if not prefer_usage_record(record, previous):
+                        continue
                 records[key] = record
     except OSError:
         parse_errors += 1
@@ -239,6 +248,8 @@ def aggregate_local_usage(claude_home: Path, top_n: int, days: int) -> dict[str,
     files = sorted(projects_dir.rglob("*.jsonl")) if projects_dir.exists() else []
 
     totals: Counter[str] = Counter()
+    daily: dict[str, Counter[str]] = defaultdict(Counter)
+    daily_sessions: dict[str, set[str]] = defaultdict(set)
     model_totals: dict[str, Counter[str]] = defaultdict(Counter)
     model_requests: Counter[str] = Counter()
     project_totals: dict[str, Counter[str]] = defaultdict(Counter)
@@ -272,7 +283,8 @@ def aggregate_local_usage(claude_home: Path, top_n: int, days: int) -> dict[str,
                 previous = unique.get(key)
                 if previous is not None:
                     duplicate_rows += 1
-                    record = merge_usage_record(record, previous)
+                    if not prefer_usage_record(record, previous):
+                        continue
                 unique[key] = record
 
     for record in unique.values():
@@ -289,6 +301,9 @@ def aggregate_local_usage(claude_home: Path, top_n: int, days: int) -> dict[str,
         session_file = record["session_file"]
 
         add_usage(totals, usage)
+        add_usage(daily[day], usage)
+        daily[day]["requests"] += 1
+        daily_sessions[day].add(session_file)
         add_usage(model_totals[model], usage)
         model_requests[model] += 1
         add_usage(project_totals[project], usage)
@@ -312,8 +327,15 @@ def aggregate_local_usage(claude_home: Path, top_n: int, days: int) -> dict[str,
             meta["date"] = day
             meta["project"] = project
 
-    history = daily_history(unique.values())
-    daily_rows = history["days"]
+    daily_rows: list[dict[str, Any]] = []
+    for day in sorted(daily):
+        row: dict[str, Any] = {
+            "date": day,
+            "sessions": len(daily_sessions[day]),
+            "requests": int(daily[day].get("requests", 0)),
+        }
+        row.update(counter_dict(daily[day]))
+        daily_rows.append(row)
     if days > 0:
         daily_rows = daily_rows[-days:]
 
@@ -361,7 +383,6 @@ def aggregate_local_usage(claude_home: Path, top_n: int, days: int) -> dict[str,
         "duplicate_usage_records_skipped": duplicate_rows,
         "token_totals": counter_dict(totals),
         "daily_usage": daily_rows,
-        "daily_tokens": history,
         "by_model": by_model[:top_n],
         "by_project": by_project[:top_n],
         "top_sessions": top_sessions,

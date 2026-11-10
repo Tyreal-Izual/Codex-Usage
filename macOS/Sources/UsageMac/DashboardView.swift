@@ -184,7 +184,6 @@ struct DashboardView: View {
                 ClaudeLimits(data: $0, language: language)
             }
             SourceSection(report: .isambard, model: model) { IsambardView(data: $0, language: language, maintenance: false) }
-            DailyTokensView(reports: model.reports, sources: model.sources, errors: model.errors, language: language)
             EqualWidthCardsLayout(minimumColumnWidth: 400) {
                 if model.sources.contains("claude") {
                     SourceSection(report: .claude, model: model, fillHeight: true) { data in
