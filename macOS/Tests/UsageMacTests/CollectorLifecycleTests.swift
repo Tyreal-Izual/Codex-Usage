@@ -4,6 +4,119 @@ import XCTest
 
 final class CollectorLifecycleTests: XCTestCase {
     @MainActor
+    func testHistoryAndSourceChangesWaitForHelperThenApplyLatestSettingsWithoutPolling() async throws {
+        let fixture = try HelperFixture()
+        defer { fixture.remove() }
+        let client = fixture.client(heldReport: "local-usage")
+        let name = "UsageMacTests." + UUID().uuidString
+        let defaults = UserDefaults(suiteName: name)!
+        defaults.set(["codex"], forKey: "sources")
+        defaults.set(false, forKey: "automatic")
+        let model = DashboardModel(defaults: defaults, demo: false, client: client)
+        defer { model.stop(); defaults.removePersistentDomain(forName: name) }
+        await model.start()
+        let first = await eventually { fixture.actions().contains("held:30") }
+        XCTAssertTrue(first)
+        model.sources = []
+        let disabled = await eventually { model.pending.isEmpty }
+        XCTAssertTrue(disabled)
+        model.sources = ["codex"]
+        let enabled = await eventually { model.pending.contains(.local) }
+        XCTAssertTrue(enabled)
+        _ = try await client.request("hello")
+        XCTAssertEqual(fixture.heldDays(), [30])
+        XCTAssertNil(model.errors[.local])
+        _ = try await client.request("release_report")
+        let sameOptions = await eventually { fixture.heldDays() == [30, 30] }
+        XCTAssertTrue(sameOptions)
+        XCTAssertNil(model.reports[.local])
+
+        model.days = 31
+        model.days = 32
+        model.days = 33
+        let replacement = await eventually { model.pending.contains(.local) }
+        XCTAssertTrue(replacement)
+        _ = try await client.request("hello") // Drain requests already written to the helper.
+        XCTAssertEqual(fixture.heldDays(), [30, 30])
+        XCTAssertNil(model.errors[.local])
+        _ = try await client.request("release_report")
+        let sent = await eventually { fixture.heldDays() == [30, 30, 33] }
+        XCTAssertTrue(sent)
+        XCTAssertNil(model.reports[.local], "Cancelled history must not be displayed")
+        _ = try await client.request("release_report")
+        let applied = await eventually { model.canRefresh && model.reports[.local]?["days"].number == 33 }
+        XCTAssertTrue(applied)
+        XCTAssertNil(model.errors[.local])
+        XCTAssertFalse(model.automatic)
+    }
+
+    @MainActor
+    func testTimedOutReportRetainsItsSlotUntilLateReply() async throws {
+        let fixture = try HelperFixture()
+        defer { fixture.remove() }
+        let client = fixture.client(reportTimeout: .seconds(1))
+        defer { client.stop() }
+        client.onDisconnect = { message in XCTFail("Responsive helper disconnected: \(message)") }
+        try client.start()
+        _ = try await client.request("hello")
+        do {
+            _ = try await client.request("report", values: ["report": .string("queued"), "days": .integer(30)])
+            XCTFail("Held report must time out")
+        }
+        catch { XCTAssertTrue(error.localizedDescription.contains("timed out")) }
+        var started = false
+        let next = Task {
+            started = true
+            return try await client.request("report", values: ["report": .string("queued"), "days": .integer(60)])
+        }
+        defer { next.cancel() }
+        let waiting = await eventually { started }
+        XCTAssertTrue(waiting)
+        _ = try await client.request("hello")
+        XCTAssertEqual(fixture.heldDays(), [30])
+        _ = try await client.request("release_report")
+        let sent = await eventually { fixture.heldDays() == [30, 60] }
+        XCTAssertTrue(sent)
+        _ = try await client.request("release_report")
+        let result = try await next.value
+        XCTAssertEqual(result["data"]["days"].number, 60)
+    }
+
+    @MainActor
+    func testStopClearsActiveAndQueuedReportsBeforeRestart() async throws {
+        let fixture = try HelperFixture()
+        defer { fixture.remove() }
+        let client = fixture.client(reportTimeout: .seconds(3))
+        defer { client.stop() }
+        try client.start()
+        _ = try await client.request("hello")
+        let first = Task { try await client.request("report", values: ["report": .string("queued"), "days": .integer(30)]) }
+        let active = await eventually { fixture.heldDays() == [30] }
+        XCTAssertTrue(active)
+        var started = false
+        let queued = Task {
+            started = true
+            return try await client.request("report", values: ["report": .string("queued"), "days": .integer(60)])
+        }
+        let waiting = await eventually { started }
+        XCTAssertTrue(waiting)
+        client.stop()
+        for task in [first, queued] {
+            do { _ = try await task.value; XCTFail("Stopped request must fail") }
+            catch { }
+        }
+        try client.start()
+        _ = try await client.request("hello")
+        let restarted = Task { try await client.request("report", values: ["report": .string("queued"), "days": .integer(90)]) }
+        defer { restarted.cancel() }
+        let sent = await eventually { fixture.heldDays() == [30, 90] }
+        XCTAssertTrue(sent)
+        _ = try await client.request("release_report")
+        let result = try await restarted.value
+        XCTAssertEqual(result["data"]["days"].number, 90)
+    }
+
+    @MainActor
     func testReportTimeoutsShareProbeAndKeepResponsiveHelperAlive() async throws {
         let fixture = try HelperFixture()
         defer { fixture.remove() }
@@ -171,11 +284,28 @@ private struct HelperFixture {
         log = Path(__file__).with_name('actions.txt')
         hello_count = 0
         probe_mode = 'reply'
+        waiting = []
+        held_report = os.environ.get('USAGE_TEST_HOLD_REPORT', 'queued')
+        def respond(request):
+            print(json.dumps({'id': request['id'], 'ok': True,
+                              'result': {'protocol': 1, 'pid': os.getpid(),
+                                         'data': {'ok': True, 'days': request.get('days')},
+                                         'integers': all(type(request.get(k)) is int for k in ('id', 'days', 'top'))}}), flush=True)
         for line in sys.stdin:
             request = json.loads(line)
             action = request['action']
             with log.open('a') as out:
                 out.write(action + '\n')
+            if action == 'report' and request.get('report') == held_report:
+                with log.open('a') as out:
+                    out.write('held:' + str(request.get('days')) + '\n')
+                if waiting:
+                    print(json.dumps({'id': request['id'], 'ok': False, 'error': 'report is still collecting'}), flush=True)
+                else:
+                    waiting.append(request)
+                continue
+            if action == 'release_report' and waiting:
+                respond(waiting.pop(0))
             if action == 'hold' or (action == 'report' and request.get('report') == 'hold'):
                 continue
             if action == 'report' and request.get('report') in ('hold_delayed_probe', 'hold_unresponsive'):
@@ -196,9 +326,7 @@ private struct HelperFixture {
             if action == 'missing_id':
                 print('{"ok":true,"result":{}}', flush=True)
                 continue
-            print(json.dumps({'id': request['id'], 'ok': True,
-                              'result': {'protocol': 1, 'pid': os.getpid(),
-                                         'integers': all(type(request.get(k)) is int for k in ('id', 'days', 'top'))}}), flush=True)
+            respond(request)
             if action == 'hello':
                 with log.open('a') as out:
                     out.write('hello_replied\n')
@@ -207,10 +335,14 @@ private struct HelperFixture {
         """#
         try script.write(to: root.appendingPathComponent("native_backend.py"), atomically: true, encoding: .utf8)
     }
-    @MainActor func client(reportTimeout: Duration = .seconds(120), controlTimeout: Duration = .seconds(15)) -> CollectorClient {
-        CollectorClient(environment: ["USAGE_PROJECT_DIR": root.path, "CODEX_HOME": root.path, "CLAUDE_CONFIG_DIR": root.path],
+    @MainActor func client(reportTimeout: Duration = .seconds(120), controlTimeout: Duration = .seconds(15), heldReport: String = "queued") -> CollectorClient {
+        CollectorClient(environment: ["USAGE_PROJECT_DIR": root.path, "CODEX_HOME": root.path, "CLAUDE_CONFIG_DIR": root.path,
+                                      "USAGE_TEST_HOLD_REPORT": heldReport],
                         reportTimeout: reportTimeout, controlTimeout: controlTimeout)
     }
     func actions() -> String { (try? String(contentsOf: root.appendingPathComponent("actions.txt"), encoding: .utf8)) ?? "" }
+    func heldDays() -> [Int] {
+        actions().split(separator: "\n").compactMap { $0.hasPrefix("held:") ? Int($0.dropFirst(5)) : nil }
+    }
     func remove() { try? FileManager.default.removeItem(at: root) }
 }

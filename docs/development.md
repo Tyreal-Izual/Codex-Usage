@@ -26,11 +26,13 @@ outside the worker pool. A healthy reply preserves the session and polling; a fa
 probe disconnects it. Control-request timeouts still close the session.
 Request/probe timeouts and the 12-second Reconnect delay use `SuspendingClock`,
 so time spent in system sleep does not count toward these deadlines.
-Helper admission is keyed by report name: repeated polls fail immediately while that
-report is collecting, even if `days`/`top` changed. Worker capacity covers every allowed
-report (currently eight), so slow network reports cannot fill the local/Claude slots.
-Client timeouts do not cancel helper work; its eventual result can populate the cache,
-or Reconnect can stop the helper. No duplicate polls wait in the worker queue.
+The client retains helper occupancy after cancellation/timeout and keeps only the latest
+waiting replacement per report. It sends that replacement when the old reply arrives;
+waiting still counts toward the awake-time timeout, and reconnect clears both states.
+Helper admission rejects duplicates that reach it while the same report is collecting,
+even if `days`/`top` changed. Worker capacity covers every allowed report (currently
+eight), so slow network reports cannot fill the local/Claude slots.
+Late results can populate the cache. No duplicate polls wait in the helper worker queue.
 Intentional shutdown is silent. Radar owns a separate worker. UI preferences persist
 in UserDefaults; source edits during connection are applied before the initial refresh.
 AppDelegate owns the model and starts it at application launch, even with no window.

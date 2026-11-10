@@ -20,6 +20,12 @@ final class CollectorClient: CollectorConnection {
     private var generation = UUID()
     private var pending: [Int: CheckedContinuation<JSONValue, Error>] = [:]
     private var timeouts: [Int: Task<Void, Never>] = [:]
+    private struct QueuedReport {
+        let id: Int
+        let data: Data
+    }
+    private var activeReports: [String: Int] = [:]
+    private var queuedReports: [String: QueuedReport] = [:]
     private var healthProbe: Task<Void, Never>?
     private let environmentOverrides: [String: String]
     private let reportTimeout: Duration
@@ -94,7 +100,7 @@ final class CollectorClient: CollectorConnection {
 
     func request(_ action: String, values: [String: JSONValue] = [:]) async throws -> JSONValue {
         try Task.checkCancellation()
-        guard process?.isRunning == true, let input else {
+        guard process?.isRunning == true, input != nil else {
             disconnected("Collector is not connected. Reconnect to try again.")
             throw BridgeError.message("Collector is not connected.")
         }
@@ -121,8 +127,18 @@ final class CollectorClient: CollectorConnection {
                         self.disconnected("Collector control request timed out. Reconnect to try again.")
                     }
                 }
-                do { try input.write(contentsOf: data) }
-                catch { disconnected("Collector connection failed: \(error.localizedDescription)") }
+                if action == "report", let report = values["report"]?.text, !report.isEmpty {
+                    if activeReports[report] != nil {
+                        // Settings changes keep only the latest replacement, outside the helper pool.
+                        if let previous = queuedReports[report] {
+                            finish(previous.id, result: .failure(CancellationError()))
+                        }
+                        queuedReports[report] = QueuedReport(id: id, data: data)
+                        return
+                    }
+                    activeReports[report] = id
+                }
+                send(data)
             }
         } onCancel: {
             Task { @MainActor [weak self] in self?.finish(id, result: .failure(CancellationError())) }
@@ -147,6 +163,13 @@ final class CollectorClient: CollectorConnection {
                 }
                 finish(id, result: reply.ok ? .success(reply.result ?? .null)
                        : .failure(BridgeError.message(reply.error ?? "Collection failed")))
+                if let report = activeReports.first(where: { $0.value == id })?.key {
+                    activeReports.removeValue(forKey: report)
+                    if let next = queuedReports.removeValue(forKey: report) {
+                        activeReports[report] = next.id
+                        send(next.data)
+                    }
+                }
             } catch {
                 disconnected("Invalid collector response. Use Reconnect to try again.")
                 return
@@ -155,8 +178,19 @@ final class CollectorClient: CollectorConnection {
     }
 
     private func finish(_ id: Int, result: Result<JSONValue, Error>) {
+        // Cancelling a Swift waiter does not cancel the collection already sent to Python.
+        // Its active slot is released only by a helper reply or by closing the session.
+        if let report = queuedReports.first(where: { $0.value.id == id })?.key {
+            queuedReports.removeValue(forKey: report)
+        }
         timeouts.removeValue(forKey: id)?.cancel()
         pending.removeValue(forKey: id)?.resume(with: result)
+    }
+
+    private func send(_ data: Data) {
+        guard let input else { return }
+        do { try input.write(contentsOf: data) }
+        catch { disconnected("Collector connection failed: \(error.localizedDescription)") }
     }
 
     private func checkHealth() {
@@ -200,6 +234,8 @@ final class CollectorClient: CollectorConnection {
         output = nil
         if let task, task.isRunning { task.terminate() }
         buffer.removeAll()
+        activeReports.removeAll()
+        queuedReports.removeAll()
         for id in Array(pending.keys) { finish(id, result: .failure(BridgeError.message(message))) }
     }
 

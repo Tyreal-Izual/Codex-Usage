@@ -14,7 +14,7 @@ struct ResetCreditDetails {
     }
 
     struct Credit: Identifiable {
-        let id: String
+        let id: OccurrenceID
         let data: JSONValue
         let expiresAt: Date?
         let grantedAt: Date?
@@ -62,14 +62,14 @@ struct ResetCreditDetails {
         availableCount = Self.count(data["available_count"])
         totalEarnedCount = Self.count(data["total_earned_count"])
         if case .array = data["credits"] { hasCreditList = true } else { hasCreditList = false }
-        var occurrences: [String: Int] = [:]
-        credits = data["credits"].items.enumerated().map { index, item in
+        // Identity excludes status/countdown so time passing does not recreate a row.
+        let identified = identifiedValues(data["credits"].items) { item in
+            [item["reset_type"].display, item["granted_at"].display, item["expires_at"].display].joined(separator: "|")
+        }
+        credits = identified.enumerated().map { index, entry in
+            let item = entry.value
             let expires = LimitFormatting.timestamp(item["expires_at"])
             let granted = LimitFormatting.timestamp(item["granted_at"])
-            // Identity excludes status/countdown so time passing does not recreate a row.
-            let key = [item["reset_type"].display, item["granted_at"].display, item["expires_at"].display].joined(separator: "|")
-            let occurrence = occurrences[key, default: 0]
-            occurrences[key] = occurrence + 1
             let state: State
             switch item["status"].text.lowercased() {
             case "available":
@@ -81,7 +81,7 @@ struct ResetCreditDetails {
             case "redeeming", "pending", "in_progress": state = .inProgress
             default: state = .unknown
             }
-            return Credit(id: "\(key)#\(occurrence)", data: item, expiresAt: expires, grantedAt: granted,
+            return Credit(id: entry.id, data: item, expiresAt: expires, grantedAt: granted,
                           state: state, sourceOrder: index)
         }.sorted { first, second in
             if first.state.sortOrder != second.state.sortOrder { return first.state.sortOrder < second.state.sortOrder }
