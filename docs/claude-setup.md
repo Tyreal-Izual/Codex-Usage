@@ -6,6 +6,8 @@ Local token history is read from `~/.claude/projects/**/*.jsonl` with no setup.
 See [data boundaries](development.md#data-boundaries) for aggregation rules.
 The 5-hour/7-day limits require a sanitized snapshot at `~/.claude/usage-dashboard.json`.
 App refresh reads that snapshot; it does not force an account refresh.
+The 7-day window is the all-model total. Model-specific allowances (such as Fable)
+never overwrite or substitute for that total, even when it is missing.
 
 ## Status line capture
 

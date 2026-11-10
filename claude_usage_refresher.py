@@ -96,15 +96,13 @@ exit 0
 ANSI_CSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 ANSI_OSC_RE = re.compile(r"\x1b\][^\x07]*(?:\x07|\x1b\\)")
 PERCENT_USED_PATTERN = r"(?<!\d)(\d{1,3}(?:\.\d+)?)%used"
-SESSION_USAGE_RE = re.compile(
-    r"Currentsession(?:(?!Currentweek).)*?" + PERCENT_USED_PATTERN
-    + r"(?:(?!Currentweek).)*?Resets(.*?)(?=Currentweek|What.?scontributing|$)",
+USAGE_SECTION_RE = re.compile(
+    r"(Currentsession|Currentweek(?:\([^)]*\))?|Extrausage|"
+    r"\+\d+(?:\.\d+)?%weekly|What.?scontributing|Scanninglocalsessions|Refreshing)",
     re.IGNORECASE | re.DOTALL,
 )
-WEEKLY_USAGE_RE = re.compile(
-    r"Currentweek(?:\(allmodels\))?.*?" + PERCENT_USED_PATTERN + r".*?Resets"
-    r"(.*?)(?=(?:\+\d+(?:\.\d+)?%weekly|What.?scontributing|"
-    r"Scanninglocalsessions|Refreshing|Currentweek|$))",
+WINDOW_USAGE_RE = re.compile(
+    PERCENT_USED_PATTERN + r".*?Resets(.*)",
     re.IGNORECASE | re.DOTALL,
 )
 MONTHS = {
@@ -315,18 +313,25 @@ def parse_reset_time(value: str, now: datetime | None = None) -> int | None:
 
 def parse_usage_screen(value: bytes) -> dict[str, dict[str, float | int]]:
     compact = re.sub(r"\s+", "", strip_terminal_codes(value))
-    # Screen-reader updates may omit unchanged labels. Only explicitly labelled
-    # blocks are safe to associate with a subscription window; an unlabelled
-    # update after "Refreshing" may belong to either window.
-    session_matches = list(SESSION_USAGE_RE.finditer(compact))
-    weekly_matches = list(WEEKLY_USAGE_RE.finditer(compact))
-    session = session_matches[-1] if session_matches else None
-    weekly = weekly_matches[-1] if weekly_matches else None
+    # Bound each block before reading its values. Model-specific weekly limits
+    # and unlabelled screen-reader updates must never stand in for the total.
+    sections = USAGE_SECTION_RE.split(compact)
+    keys = {
+        "currentsession": "five_hour",
+        "currentweek": "seven_day",
+        "currentweek(allmodels)": "seven_day",
+    }
+    matches = {}
+    for label, body in zip(sections[1::2], sections[2::2]):
+        key = keys.get(label.lower())
+        if key is None or body.startswith("("):  # Incomplete qualifier.
+            continue
+        match = WINDOW_USAGE_RE.search(body)
+        if match is not None:
+            matches[key] = match
 
     windows: dict[str, dict[str, float | int]] = {}
-    for key, match in (("five_hour", session), ("seven_day", weekly)):
-        if match is None:
-            continue
+    for key, match in matches.items():
         used_percentage = percentage(match.group(1))
         if used_percentage is None:
             continue

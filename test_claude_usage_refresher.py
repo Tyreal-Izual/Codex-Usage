@@ -332,6 +332,60 @@ class UsageScreenParserTest(unittest.TestCase):
         self.assertEqual(set(windows), {"five_hour"})
         self.assertEqual(windows["five_hour"]["used_percentage"], 41.0)
 
+    def test_model_allowances_do_not_overwrite_weekly_total(self) -> None:
+        for model in ("Fable", "Sonnet", "Opus", "Future model"):
+            with self.subTest(model=model):
+                windows = refresher.parse_usage_screen(
+                    b"Current session\n4% 4% used\nResets 4:40pm (Europe/London)\n"
+                    b"Current week (all models)\n8% 8% used\n"
+                    b"Resets Nov 13 at 4pm (Europe/London)\n"
+                    + f"Esc to cancelCurrent week ({model})\n".encode()
+                    + b"0% 0% used\nResets Nov 14 at 5pm (Europe/London)"
+                )
+
+                self.assertEqual(set(windows), {"five_hour", "seven_day"})
+                self.assertEqual(windows["five_hour"]["used_percentage"], 4.0)
+                self.assertEqual(windows["seven_day"]["used_percentage"], 8.0)
+                self.assertEqual(
+                    windows["seven_day"]["resets_at"],
+                    refresher.parse_reset_time("Nov 13 at 4pm (Europe/London)"),
+                )
+
+    def test_model_allowance_alone_is_not_a_weekly_total(self) -> None:
+        with self.assertRaisesRegex(ValueError, "valid subscription window"):
+            refresher.parse_usage_screen(
+                b"Current week (Fable) 0% used Resets Nov 13 at 4pm"
+            )
+
+    def test_partial_total_cannot_borrow_model_percentage_or_reset(self) -> None:
+        for total in (b"", b"8% used"):
+            with self.subTest(total=total):
+                windows = refresher.parse_usage_screen(
+                    b"Current session 4% used Resets 4:40pm "
+                    b"Current week (all models) " + total
+                    + b" Current week (Fable) 0% used Resets Nov 13 at 4pm"
+                )
+
+                self.assertEqual(set(windows), {"five_hour"})
+
+    def test_latest_total_survives_model_allowance_rerenders(self) -> None:
+        windows = refresher.parse_usage_screen(
+            b"Current week (Fable) 1% used Resets Nov 13 at 4pm "
+            b"Current week (all models) 8% used Resets Nov 13 at 4pm "
+            b"Current week (all models) 9% used Resets Nov 13 at 4pm "
+            b"Current week (Fable) 2% used Resets Nov 13 at 4pm"
+        )
+
+        self.assertEqual(windows["seven_day"]["used_percentage"], 9.0)
+
+    def test_unqualified_week_is_still_supported(self) -> None:
+        windows = refresher.parse_usage_screen(
+            b"Current week 8% used Resets Nov 13 at 4pm "
+            b"Current week (Fable) 0% used Resets Nov 13 at 4pm"
+        )
+
+        self.assertEqual(windows["seven_day"]["used_percentage"], 8.0)
+
     def test_numeric_progress_bar_cannot_pollute_percentage(self) -> None:
         windows = refresher.parse_usage_screen(
             b"Current session 123441% used Resets 1pm "

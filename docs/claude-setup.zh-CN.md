@@ -5,6 +5,7 @@
 本地 token 历史直接读取 `~/.claude/projects/**/*.jsonl`，无需配置。
 token 汇总规则见[统计口径](development.md#data-boundaries)。
 5 小时和 7 天额度读取 `~/.claude/usage-dashboard.json` 快照；应用刷新不会强制更新账户额度。
+7 天额度只表示所有模型的总额度；Fable 等模型专属额度不会覆盖或替代它，即使总额度缺失也一样。
 
 ## 状态栏采集
 
