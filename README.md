@@ -31,7 +31,7 @@ credit-expiry hints. Headers wrap as needed, and changed numbers briefly highlig
 - **Back to limits**: align Codex limits with the top; startup does this once after
   loading. Later refreshes preserve your scroll position.
 - **Refresh (`⌘R`)**: collect according to source caches; Radar syncs every four hours.
-  **Reconnect** appears after a request waits 12 seconds, or immediately after a disconnect.
+  **Reconnect** appears after a request waits 12 seconds (excluding system sleep), or immediately after a disconnect.
 - **Export**: save the current reports, update times and errors as JSON.
 - **Menu bar**: remaining quota with its window; falls back to weekly when needed.
   Closing the window keeps the app running; `⌘Q` quits.

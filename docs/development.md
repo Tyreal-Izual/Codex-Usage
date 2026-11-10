@@ -15,29 +15,26 @@
 | `scripts/` | App packaging, icon generation and bundle verification |
 | `codex_claude_usage_web.py`, `static/`, `templates/` | Retained web interface; excluded from the native app's UI resources |
 
-SwiftUI owns a persistent Python helper and communicates over stdin/stdout, with no
-HTTP listener or WebView. Sources return independently; source changes invalidate old
-replies. EOF, process exit and invalid responses close the helper session, fail pending
-requests and expose Reconnect in the toolbar/menu. During collection it appears only
-after a request has waited 12 seconds, so routine refreshes do not flash the button.
-Timed-out reports keep it available until a later report result or explicit cancellation.
-Reports time out after 120 seconds individually, then share a 15-second `hello` probe
-outside the worker pool. A healthy reply preserves the session and polling; a failed
-probe disconnects it. Control-request timeouts still close the session.
-Request/probe timeouts and the 12-second Reconnect delay use `SuspendingClock`,
-so time spent in system sleep does not count toward these deadlines.
-The client retains helper occupancy after cancellation/timeout and keeps only the latest
-waiting replacement per report. It sends that replacement when the old reply arrives;
-waiting still counts toward the awake-time timeout, and reconnect clears both states.
-Helper admission rejects duplicates that reach it while the same report is collecting,
-even if `days`/`top` changed. Worker capacity covers every allowed report (currently
-eight), so slow network reports cannot fill the local/Claude slots.
-Late results can populate the cache. No duplicate polls wait in the helper worker queue.
-Intentional shutdown is silent. Radar owns a separate worker. UI preferences persist
-in UserDefaults; source edits during connection are applied before the initial refresh.
-AppDelegate owns the model and starts it at application launch, even with no window.
-Changing the polling interval reschedules it immediately.
-Request IDs, `days` and `top` use explicit JSON integers on the private wire.
+SwiftUI communicates with a persistent Python helper over stdin/stdout; there is no
+HTTP listener or WebView. `AppDelegate` owns the model and starts collection even
+without an open window. Preferences live in UserDefaults. Request IDs, `days` and
+`top` are JSON integers.
+
+- **Settings and replies:** source changes invalidate pending replies. The client keeps
+  one active collection and only the latest waiting replacement per report. Cancellation
+  or timeout does not free the helper's slot; its reply does, and reconnect clears both.
+- **Deadlines:** reports have 120 seconds, control requests/probes 15 seconds. Reconnect
+  appears after 12 seconds of waiting or immediately after disconnection. After a report
+  timeout it remains until a later result or cancellation. Timers include client queue
+  waits but exclude system sleep (`SuspendingClock`).
+- **Recovery:** a report timeout fails that request and starts one shared `hello` probe.
+  A healthy reply preserves the connection; failed probes, control timeouts, EOF, process exit or
+  malformed replies close the session and fail pending requests. Intentional stop is silent.
+- **Isolation:** the helper admits one collection per report and has capacity for all
+  eight report types. Duplicates are rejected before submission; late results can fill
+  the cache. Control/Radar reads bypass the pool; Radar has its own fetch worker.
+- **Capture:** the optional Claude refresher drains stdout/stderr while the CLI runs,
+  with bounded cleanup after timeout.
 
 ## Configuration
 
@@ -65,7 +62,8 @@ preferences, local sources are auto-detected and Isambard/Radar are enabled.
 | Isambard | 30 seconds over a five-minute disk cache; manual bypass at most once per 30 seconds |
 | Radar | Independent four-hour worker; [retry and validation rules](radar.md) |
 
-The refresh preference controls polling, not upstream cache expiry. History rows
+Changing the refresh preference reschedules polling immediately; upstream cache expiry
+is independent. History rows
 limit local daily tables; local totals remain historical. Admin API uses the same
 value as its lookback in days. Limit countdowns and snapshot age update without a
 fetch. Missing values, false and zero stay distinct.

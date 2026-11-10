@@ -835,7 +835,7 @@ def session_date_from_path(path: Path) -> str | None:
     return None
 
 
-_SESSION_CACHE: dict[str, tuple[tuple[int, int, int], dict[str, Any]]] = {}
+_SESSION_CACHE: dict[str, tuple[tuple[int, int, int, int], dict[str, Any]]] = {}
 _SESSION_CACHE_LOCK = threading.Lock()
 
 
@@ -905,7 +905,7 @@ def cached_session_file(file_path: Path) -> dict[str, Any]:
     with _SESSION_CACHE_LOCK:
         try:
             stat = file_path.stat()
-            signature = (stat.st_mtime_ns, stat.st_size, stat.st_ino)
+            signature = (stat.st_mtime_ns, stat.st_ctime_ns, stat.st_size, stat.st_ino)
         except OSError:
             return scan_session_file(file_path)
         key = str(file_path)

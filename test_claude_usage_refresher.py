@@ -3,6 +3,8 @@ from __future__ import annotations
 import io
 import json
 import os
+import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -278,6 +280,62 @@ class RefresherLockTest(unittest.TestCase):
                 with self.assertRaisesRegex(OSError, "unlock failed"):
                     self.call_once(Path(directory))
             handle.close.assert_called_once()
+
+
+class RefresherOutputTest(unittest.TestCase):
+    SCREEN = b"Current session 41% used Resets 1pm Current week (all models) 52% used Resets Aug 30 at 5pm"
+
+    def capture(self, root, spawn, stop):
+        snapshot = root / "usage-dashboard.json"
+        snapshot.write_text(json.dumps({"claude_version": "fixture"}))
+        locking = SimpleNamespace(LOCK_EX=2, LOCK_NB=4, LOCK_UN=8, flock=Mock())
+        with (patch.object(refresher, "fcntl", locking),
+              patch.object(refresher, "resolve_expect_binary", return_value=Path(sys.executable)),
+              patch.object(refresher.subprocess, "Popen", side_effect=spawn),
+              patch.object(refresher, "stop_process", side_effect=stop) as stopped,
+              patch("sys.stderr", new_callable=io.StringIO)):
+            result = refresher.run_once(project=root, snapshot=snapshot, state_path=root / "state.json",
+                claude_binary=root / "fixture", min_age_seconds=600, reset_grace_seconds=30,
+                retry_base_seconds=300, ready_timeout_seconds=0, startup_delay_seconds=0,
+                timeout_seconds=0, exit_grace_seconds=0, force=True, quiet=True)
+        self.assertEqual(result, 0)
+        saved = json.loads(snapshot.read_text())
+        self.assertEqual(saved["rate_limits"]["seven_day"]["used_percentage"], 52)
+        return stopped
+
+    def test_large_stdout_and_stderr_do_not_block_capture(self):
+        real_spawn = subprocess.Popen
+        def spawn(*args, **kwargs):
+            script = ("import sys; sys.stdout.write('x'*262144); sys.stdout.flush(); "
+                      "sys.stderr.write('y'*262144); sys.stderr.flush(); "
+                      f"sys.stdout.buffer.write({self.SCREEN!r}); sys.stdout.flush()")
+            process = real_spawn([sys.executable, "-c", script], **kwargs)
+            self.addCleanup(process.stdout.close)
+            self.addCleanup(process.stderr.close)
+            return process
+        def stop(process):
+            process.kill()
+            process.wait(timeout=3)
+        with tempfile.TemporaryDirectory() as directory:
+            stopped = self.capture(Path(directory), spawn, stop)
+        stopped.assert_not_called()
+
+    def test_timeout_preserves_output_already_captured(self):
+        process = Mock()
+        process.communicate.side_effect = [subprocess.TimeoutExpired('fixture', 5), (self.SCREEN, b'')]
+        with tempfile.TemporaryDirectory() as directory:
+            stopped = self.capture(Path(directory), lambda *args, **kwargs: process, lambda p: None)
+        stopped.assert_called_once_with(process)
+
+    def test_pipe_left_open_after_timeout_has_bounded_cleanup(self):
+        process = Mock()
+        process.communicate.side_effect = [subprocess.TimeoutExpired('fixture', 5),
+            subprocess.TimeoutExpired('fixture', 5, output=self.SCREEN, stderr=b'fixture')]
+        with tempfile.TemporaryDirectory() as directory:
+            stopped = self.capture(Path(directory), lambda *args, **kwargs: process, lambda p: None)
+        stopped.assert_called_once_with(process)
+        process.stdout.close.assert_called_once()
+        process.stderr.close.assert_called_once()
 
 
 class UsageScreenParserTest(unittest.TestCase):

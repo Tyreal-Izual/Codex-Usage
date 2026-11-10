@@ -578,14 +578,21 @@ def run_once(
             + 5
         )
         try:
-            process.wait(timeout=maximum_runtime)
+            # Drain both pipes while the CLI runs; waiting first can fill a pipe
+            # and block the child before it prints the usage screen.
+            terminal_output, diagnostic_output = process.communicate(timeout=maximum_runtime)
         except subprocess.TimeoutExpired:
             stop_process(process)
+            try:
+                terminal_output, diagnostic_output = process.communicate(timeout=5)
+            except subprocess.TimeoutExpired as exc:
+                # A descendant may still hold a pipe open after the parent exits.
+                terminal_output, diagnostic_output = exc.output or b"", exc.stderr or b""
+                for stream in (process.stdout, process.stderr):
+                    if stream is not None:
+                        stream.close()
 
         elapsed = time.monotonic() - started_at
-        terminal_output = b""
-        if process.stdout is not None:
-            terminal_output = process.stdout.read()
         parse_error = ""
         try:
             windows = parse_usage_screen(terminal_output)
@@ -609,9 +616,7 @@ def run_once(
                 print(f"Claude usage snapshot refreshed ({decision}) in {elapsed:.1f}s.")
             return 0
 
-        diagnostic = ""
-        if process.stderr is not None:
-            diagnostic = process.stderr.read(2_000).decode("utf-8", errors="replace").strip()
+        diagnostic = diagnostic_output[:2_000].decode("utf-8", errors="replace").strip()
         if diagnostic:
             print(f"expect failed: {diagnostic}", file=sys.stderr)
         if parse_error:

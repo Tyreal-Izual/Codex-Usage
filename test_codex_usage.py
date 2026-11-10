@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import codex_usage as codex
@@ -54,6 +55,18 @@ class SessionCacheTest(unittest.TestCase):
         self.assertEqual(result['final_token_totals_sum']['total_tokens'], 10)
         # Non-finite values are never emitted as token totals.
         json.dumps(result, allow_nan=False)
+
+    def test_in_place_rewrite_with_preserved_size_and_mtime_is_rescanned(self):
+        self.file.write_text(self.row(25))
+        before = self.file.stat()
+        # Synthetic change times make this filesystem contract deterministic on all CI hosts.
+        metadata = SimpleNamespace(st_mtime_ns=before.st_mtime_ns, st_size=before.st_size,
+                                   st_ino=before.st_ino, st_ctime_ns=1)
+        with patch.object(Path, 'stat', return_value=metadata):
+            self.assertEqual(codex.cached_session_file(self.file)['final_usage']['total_tokens'], 25)
+            self.file.write_text(self.row(26))
+            metadata.st_ctime_ns = 2
+            self.assertEqual(codex.cached_session_file(self.file)['final_usage']['total_tokens'], 26)
 
     def test_empty_home_has_empty_statistics(self):
         result = codex.collect_local_usage(self.home, 10)
