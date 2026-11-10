@@ -7,7 +7,7 @@
 | Path | Responsibility |
 | --- | --- |
 | `macOS/Sources/UsageMac/` | SwiftUI scenes, layouts/theme, observable state, limit presentation and helper client |
-| `native_backend.py` | Private JSON-lines dispatcher: request IDs, two workers, eight outstanding reports |
+| `native_backend.py` | Private JSON-lines dispatcher: request IDs and one active collection per report |
 | `usage_reports.py`, `usage_sources.py`, `usage_common.py` | Report composition, source caches, paths, atomic writes and verified TLS |
 | `codex_usage.py`, `claude_usage.py` | Local/online collectors and token aggregation |
 | `codex_radar.py`, `isambard_status.py` | Public-source collection and disk caches |
@@ -24,6 +24,11 @@ Timed-out reports keep it available until a later report result or explicit canc
 Reports time out after 120 seconds individually, then share a 15-second `hello` probe
 outside the worker pool. A healthy reply preserves the session and polling; a failed
 probe disconnects it. Control-request timeouts still close the session.
+Helper admission is keyed by report name: repeated polls fail immediately while that
+report is collecting, even if `days`/`top` changed. Worker capacity covers every allowed
+report (currently eight), so slow network reports cannot fill the local/Claude slots.
+Client timeouts do not cancel helper work; its eventual result can populate the cache,
+or Reconnect can stop the helper. No duplicate polls wait in the worker queue.
 Intentional shutdown is silent. Radar owns a separate worker. UI preferences persist
 in UserDefaults; source edits during connection are applied before the initial refresh.
 AppDelegate owns the model and starts it at application launch, even with no window.

@@ -88,10 +88,13 @@ class NativeBackend:
 
 
 def serve(backend: NativeBackend, incoming: TextIO, outgoing: TextIO) -> None:
-    """Correlate replies by ID; slow collectors never block settings or Radar reads."""
+    """One outstanding collection per report, with capacity reserved for every report."""
     output_lock = threading.Lock()
-    slots = threading.BoundedSemaphore(8)
-    pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="usage-source")
+    report_lock = threading.Lock()
+    running: set[str] = set()
+    # Admit each report before submission. Repeated polls never occupy workers
+    # waiting in SourceCache, and blocked reports cannot consume another's capacity.
+    pool = ThreadPoolExecutor(max_workers=len(REPORTS), thread_name_prefix="usage-source")
 
     def reply(payload: dict[str, Any]) -> None:
         try:
@@ -106,14 +109,16 @@ def serve(backend: NativeBackend, incoming: TextIO, outgoing: TextIO) -> None:
             except (BrokenPipeError, OSError, ValueError):
                 pass  # The app closed its pipe while a collection was finishing.
 
-    def run(request: dict[str, Any], *, release: bool = False) -> None:
+    def run(request: dict[str, Any], *, report: str | None = None) -> None:
         try:
-            reply({"id": request["id"], "ok": True, "result": backend.handle(request)})
+            response = {"id": request["id"], "ok": True, "result": backend.handle(request)}
         except Exception as error:
-            reply({"id": request["id"], "ok": False, "error": str(error)})
+            response = {"id": request["id"], "ok": False, "error": str(error)}
         finally:
-            if release:
-                slots.release()
+            if report is not None:
+                with report_lock:
+                    running.discard(report)
+        reply(response)
 
     try:
         while line := incoming.readline(MAX_LINE_BYTES + 1):
@@ -132,10 +137,23 @@ def serve(backend: NativeBackend, incoming: TextIO, outgoing: TextIO) -> None:
                 if type(identifier) is not int or identifier < 0:
                     raise ValueError("Request requires a nonnegative integer id")
                 if request.get("action") == "report":
-                    if slots.acquire(blocking=False):
-                        pool.submit(run, request, release=True)
-                    else:
-                        reply({"id": identifier, "ok": False, "error": "Collectors are busy; retry shortly"})
+                    report = request.get("report")
+                    if not isinstance(report, str) or report not in REPORTS:
+                        raise ValueError("Unknown action or report")
+                    with report_lock:
+                        busy = report in running
+                        if not busy:
+                            running.add(report)
+                    if busy:
+                        reply({"id": identifier, "ok": False,
+                               "error": f"{report} is still collecting; retry shortly or use Reconnect"})
+                        continue
+                    try:
+                        pool.submit(run, request, report=report)
+                    except Exception:
+                        with report_lock:
+                            running.discard(report)
+                        raise
                 else:
                     run(request)
             except (ValueError, TypeError) as error:
