@@ -238,4 +238,3 @@ def daily_history(records):
                  for day, row in sorted(days.items())],
         "unknown_date_tokens": unknown,
     }
-
