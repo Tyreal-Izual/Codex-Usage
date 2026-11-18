@@ -27,7 +27,9 @@ class NativeBackend:
                  radar: Any = None) -> None:
         self.sources = sources
         self.cache_dir = cache_dir
-        self.cache = SourceCache()
+        # Native reports are only inspected and serialized; immutable sharing avoids
+        # cloning every cached response while legacy callers retain mutable copies.
+        self.cache = SourceCache(shared_snapshots=True)
         self.lock = threading.RLock()
         self.radar = radar or codex_radar.RadarService(cache_dir / "codex_radar_snapshot.json")
         self.force_after = 0.0

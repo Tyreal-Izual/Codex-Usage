@@ -1,8 +1,14 @@
 import SwiftUI
 
-struct ResetCredits: View {
-    let data: JSONValue
+struct ResetCredits: View, Equatable {
+    private let data: JSONValue
     let language: Language
+
+    init(data: JSONValue, language: Language) {
+        let keys = ["ok", "credits", "available_count", "total_earned_count", "retrieved_at_unix_ms"]
+        self.data = .object(Dictionary(uniqueKeysWithValues: keys.map { ($0, data[$0]) }))
+        self.language = language
+    }
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 60)) { timeline in

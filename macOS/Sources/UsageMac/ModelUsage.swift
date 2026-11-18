@@ -42,30 +42,10 @@ struct ModelUsage: View {
     var showDetails: (() -> Void)?
 
     var body: some View {
-        let distribution = ModelDistribution(items: items, tokenKey: tokenKey, countKey: countKey, locale: language.locale)
         TimelineView(.periodic(from: .now, by: 60)) { timeline in
             Panel(title: title, subtitle: subtitle, facts: updateFacts(now: timeline.date), fillHeight: fillHeight) {
-                HStack {
-                    HStack(spacing: 4) {
-                        Text(distribution.total.map { JSONValue.number($0).display(locale: language.locale) } ?? "—")
-                            .highlightChanges(value: distribution.total.map { JSONValue.number($0).display })
-                        Text(language.text("Tokens Used", "已用 token"))
-                    }.accessibilityElement(children: .combine)
-                    Spacer()
-                    HStack(spacing: 4) {
-                        Text(unavailable ? "—" : String(distribution.rows.count))
-                            .highlightChanges(value: unavailable ? nil : String(distribution.rows.count))
-                        Text(language.text("Models", "个模型"))
-                    }.accessibilityElement(children: .combine)
-                }.font(.subheadline.weight(.semibold)).foregroundStyle(DashboardTheme.muted).monospacedDigit()
-                ModelShareBar(distribution: distribution, locale: language.locale)
-                if distribution.rows.isEmpty {
-                    Text(unavailable ? language.text("Model data unavailable", "模型数据暂不可用")
-                         : language.text("No model records yet", "暂无模型记录"))
-                        .foregroundStyle(DashboardTheme.muted).padding(.vertical, 12)
-                } else {
-                    ModelUsageTable(distribution: distribution, countKey: countKey, language: language)
-                }
+                ModelUsageContent(items: items, tokenKey: tokenKey, countKey: countKey,
+                                  language: language, unavailable: unavailable).equatable()
                 if let showDetails {
                     Button(action: showDetails) {
                         HStack(spacing: 6) { Text(detailTitle); Image(systemName: "arrow.right") }
@@ -83,6 +63,42 @@ struct ModelUsage: View {
         return [PanelFact(id: "updated", label: language.text("Updated", "更新于"),
                           value: LimitFormatting.age(since: date, now: now, language: language),
                           help: dateText(date, language: language))]
+    }
+}
+
+/// Keep metric/table nodes stable when only panel freshness changes.
+private struct ModelUsageContent: View, Equatable {
+    let items: [JSONValue]
+    let tokenKey: String
+    let countKey: String
+    let language: Language
+    let unavailable: Bool
+
+    var body: some View {
+        let distribution = ModelDistribution(items: items, tokenKey: tokenKey, countKey: countKey, locale: language.locale)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                HStack(spacing: 4) {
+                    Text(distribution.total.map { JSONValue.number($0).display(locale: language.locale) } ?? "—")
+                        .highlightChanges(value: distribution.total.map { JSONValue.number($0).display })
+                    Text(language.text("Tokens Used", "已用 token"))
+                }.accessibilityElement(children: .combine)
+                Spacer()
+                HStack(spacing: 4) {
+                    Text(unavailable ? "—" : String(distribution.rows.count))
+                        .highlightChanges(value: unavailable ? nil : String(distribution.rows.count))
+                    Text(language.text("Models", "个模型"))
+                }.accessibilityElement(children: .combine)
+            }.font(.subheadline.weight(.semibold)).foregroundStyle(DashboardTheme.muted).monospacedDigit()
+            ModelShareBar(distribution: distribution, locale: language.locale)
+            if distribution.rows.isEmpty {
+                Text(unavailable ? language.text("Model data unavailable", "模型数据暂不可用")
+                     : language.text("No model records yet", "暂无模型记录"))
+                    .foregroundStyle(DashboardTheme.muted).padding(.vertical, 12)
+            } else {
+                ModelUsageTable(distribution: distribution, countKey: countKey, language: language)
+            }
+        }
     }
 }
 
@@ -127,15 +143,12 @@ private struct ModelUsageTable: View {
             DashboardDivider().gridCellUnsizedAxes(.horizontal)
             ForEach(distribution.rows) { row in
                 GridRow(alignment: .center) {
-                    HStack(spacing: 8) {
-                        Circle().fill(DashboardTheme.modelColors[row.colorIndex % DashboardTheme.modelColors.count]).frame(width: 9, height: 9).accessibilityHidden(true)
-                        Text(row.name).fontWeight(.semibold).lineLimit(2).help(row.name)
-                    }.frame(minWidth: 70, maxWidth: .infinity, alignment: .leading)
-                    Text(row.count).fixedSize().highlightChanges(value: row.count)
-                    Text(row.tokens.map { JSONValue.number($0).display(locale: language.locale) } ?? "—").fontWeight(.medium).fixedSize()
-                        .highlightChanges(value: row.tokens.map { JSONValue.number($0).display })
-                    Text(distribution.share(of: row).map { String(format: "%.1f%%", $0 * 100) } ?? "—").fontWeight(.semibold).fixedSize()
-                        .highlightChanges(value: distribution.share(of: row).map { String(format: "%.1f", $0 * 100) })
+                    ModelNameCell(name: row.name, colorIndex: row.colorIndex).equatable()
+                    ModelNumberCell(text: row.count, change: row.count).equatable()
+                    ModelNumberCell(text: row.tokens.map { JSONValue.number($0).display(locale: language.locale) } ?? "—",
+                                    change: row.tokens.map { JSONValue.number($0).display }, weight: .medium).equatable()
+                    ModelNumberCell(text: distribution.share(of: row).map { String(format: "%.1f%%", $0 * 100) } ?? "—",
+                                    change: distribution.share(of: row).map { String(format: "%.1f", $0 * 100) }, weight: .semibold).equatable()
                 }
                 .font(.subheadline).monospacedDigit().padding(.vertical, 9)
                 .accessibilityElement(children: .combine)
@@ -143,5 +156,26 @@ private struct ModelUsageTable: View {
             }
         }
         .textSelection(.enabled)
+    }
+}
+
+private struct ModelNameCell: View, Equatable {
+    let name: String
+    let colorIndex: Int
+    var body: some View {
+        HStack(spacing: 8) {
+            Circle().fill(DashboardTheme.modelColors[colorIndex % DashboardTheme.modelColors.count])
+                .frame(width: 9, height: 9).accessibilityHidden(true)
+            Text(name).fontWeight(.semibold).lineLimit(2).help(name)
+        }.frame(minWidth: 70, maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct ModelNumberCell: View, Equatable {
+    let text: String
+    let change: String?
+    var weight: Font.Weight? = nil
+    var body: some View {
+        Text(text).fontWeight(weight).fixedSize().highlightChanges(value: change)
     }
 }

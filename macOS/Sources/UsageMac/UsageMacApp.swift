@@ -36,15 +36,20 @@ struct UsageMacApp: App {
                 .environment(\.locale, model.language.locale)
         }
         .defaultSize(width: 1120, height: 800)
-        .commands {
-            CommandGroup(after: .newItem) {
-                Button(model.language.text("Refresh usage", "刷新用量")) { model.refresh(force: true) }
-                    .keyboardShortcut("r").disabled(!model.canRefresh)
-            }
-        }
+        .commands { UsageCommands(model: model) }
         Settings { SettingsView(model: model).modifier(DashboardAppearance()) }
         MenuBarExtra("Usage", systemImage: "chart.bar.fill") {
             UsageMenu(model: model)
+        }
+    }
+}
+
+private struct UsageCommands: Commands {
+    let model: DashboardModel
+    var body: some Commands {
+        CommandGroup(after: .newItem) {
+            Button(model.language.text("Refresh usage", "刷新用量")) { model.refresh(force: true) }
+                .keyboardShortcut("r").disabled(!model.canRefresh)
         }
     }
 }
@@ -59,15 +64,15 @@ struct UsageMenu: View {
             NSApplication.shared.activate(ignoringOtherApps: true)
         }
         Divider()
-        let codexWindows = LimitWindows(model.reports[.online]?["endpoints"]["rate_limit_status"]["data"]["rate_limit"] ?? .null)
+        let codexWindows = LimitWindows(model.reportState(.online).data?["endpoints"]["rate_limit_status"]["data"]["rate_limit"] ?? .null)
         if model.sources.contains("codex"), let summary = LimitFormatting.menuSummary(provider: "Codex",
             primaryUsed: codexWindows.primary["used_percent"].number,
             weeklyUsed: codexWindows.weekly["used_percent"].number, language: language) {
             Text(summary)
         }
         if model.sources.contains("claude"), let summary = LimitFormatting.menuSummary(provider: "Claude",
-            primaryUsed: model.reports[.claude]?["rate_limits"]["five_hour"]["used_percentage"].number,
-            weeklyUsed: model.reports[.claude]?["rate_limits"]["seven_day"]["used_percentage"].number, language: language) {
+            primaryUsed: model.reportState(.claude).data?["rate_limits"]["five_hour"]["used_percentage"].number,
+            weeklyUsed: model.reportState(.claude).data?["rate_limits"]["seven_day"]["used_percentage"].number, language: language) {
             Text(summary)
         }
         if model.connecting {

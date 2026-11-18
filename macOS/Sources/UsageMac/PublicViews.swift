@@ -30,7 +30,7 @@ struct RadarView: View {
                                 LazyVGrid(columns: columns, spacing: 10) {
                                     ForEach(efforts, id: \.self) { effort in
                                         if let point = family.first(where: { $0["effort"].text == effort }) {
-                                            RadarScoreCard(point: point, language: language)
+                                            RadarScoreCard(point: point, language: language).equatable()
                                         } else {
                                             Color.clear.accessibilityHidden(true)
                                         }
@@ -57,7 +57,10 @@ struct RadarView: View {
     }
 }
 
-private struct RadarScoreCard: View {
+private struct RadarScoreCard: View, Equatable {
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.point == rhs.point && lhs.language == rhs.language
+    }
     let point: JSONValue
     let language: Language
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -100,16 +103,22 @@ private struct RadarScoreCard: View {
     }
 }
 
-struct IsambardView: View {
-    let data: JSONValue
+struct IsambardView: View, Equatable {
+    private let data: JSONValue
     let language: Language
     var maintenance = true
+
+    init(data: JSONValue, language: Language, maintenance: Bool = true) {
+        self.data = .object(["status": data["status"], "warning": data["warning"]])
+        self.language = language
+        self.maintenance = maintenance
+    }
     var body: some View {
         Panel(title: language.text("Isambard Status", "Isambard 服务状态"), subtitle: localDate(data["status"]["fetched_at"], language: language)) {
             if data["warning"] != .null { Notice(text: data["warning"].display) }
             EqualWidthCardsLayout(minimumColumnWidth: 250, maximumColumns: 3, spacing: 12) {
                 ForEach(identifiedValues(data["status"]["statuses"].items, key: { $0.statusIdentity })) { entry in
-                    ServiceStatusCard(status: entry.value, language: language)
+                    ServiceStatusCard(status: entry.value, language: language).equatable()
                 }
             }
             if maintenance {

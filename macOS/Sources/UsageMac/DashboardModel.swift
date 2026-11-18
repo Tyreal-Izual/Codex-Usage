@@ -49,13 +49,34 @@ enum Destination: String, CaseIterable, Identifiable {
 }
 
 @MainActor @Observable
+final class ReportState {
+    fileprivate(set) var data: JSONValue?
+}
+
+@MainActor @Observable
 final class DashboardModel {
     var language: Language { didSet { save(language.rawValue, "language") } }
     var days: Int { didSet { if days != oldValue { save(days, "days"); historyChanged() } } }
     var interval: Int { didSet { if interval != oldValue { save(interval, "interval"); restartPolling() } } }
     var automatic: Bool { didSet { if automatic != oldValue { save(automatic, "automatic"); restartPolling() } } }
     var sources: Set<String> { didSet { save(Array(sources).sorted(), "sources"); configurationChanged() } }
-    var reports: [Report: JSONValue] = [:]
+    @ObservationIgnored private let reportStates = Dictionary(uniqueKeysWithValues: Report.allCases.map { ($0, ReportState()) })
+    private(set) var loadedReports: Set<Report> = []
+    var hasReports: Bool { !loadedReports.isEmpty }
+    func reportState(_ report: Report) -> ReportState { reportStates[report]! }
+    // Full snapshots stay available for export and callers; views observe one source instead.
+    var reports: [Report: JSONValue] {
+        get { reportStates.compactMapValues(\.data) }
+        set { for report in Report.allCases { storeReport(newValue[report], for: report) } }
+    }
+    private func storeReport(_ data: JSONValue?, for report: Report) {
+        let state = reportState(report)
+        guard state.data != data else { return }
+        let wasLoaded = state.data != nil
+        state.data = data
+        if !wasLoaded && data != nil { loadedReports.insert(report) }
+        else if wasLoaded && data == nil { loadedReports.remove(report) }
+    }
     var errors: [Report: String] = [:]
     var pending: Set<Report> = []
     var updated: [Report: Date] = [:]
@@ -232,7 +253,7 @@ final class DashboardModel {
                 historyRefresh = nil
                 cancelReports(Set(Report.allCases))
                 for report in Report.allCases where !selection.contains(report.source) {
-                    reports.removeValue(forKey: report)
+                    storeReport(nil, for: report)
                     errors.removeValue(forKey: report)
                     updated.removeValue(forKey: report)
                 }
@@ -283,8 +304,11 @@ final class DashboardModel {
                     self.timedOutReports.remove(report)
                     let data = report == .radar ? value : value["data"]
                     let message = collectionError(data: data, envelope: value)
-                    if data["ok"].flag != false || self.reports[report] == nil { self.reports[report] = data }
-                    self.errors[report] = message.isEmpty ? nil : message
+                    if data["ok"].flag != false || self.reportState(report).data == nil {
+                        self.storeReport(data, for: report)
+                    }
+                    let error = message.isEmpty ? nil : message
+                    if self.errors[report] != error { self.errors[report] = error }
                     if data["ok"].flag != false { self.updated[report] = Date() }
                 } catch is CancellationError { }
                 catch {

@@ -60,6 +60,30 @@ class CollectionTest(unittest.TestCase):
 
 
 class SourceCacheTest(unittest.TestCase):
+    def test_native_snapshots_are_shared_read_only_and_json_equivalent(self):
+        original = ({'rows': [{'count': 3}], 'missing': None}, None)
+        cache = sources.SourceCache(shared_snapshots=True)
+        first = cache.get(('native',), lambda: original, 60)
+        second = cache.get(('native',), lambda: self.fail('cache miss'), 60)
+        self.assertIs(first, second)
+        self.assertEqual(json.dumps(first), json.dumps(original))
+        original[0]['rows'][0]['count'] = 99
+        self.assertEqual(first[0]['rows'][0]['count'], 3)
+        for mutate in (lambda: first[0].clear(), lambda: first[0]['rows'].append({}),
+                       lambda: first[0]['rows'][0].update(count=4),
+                       lambda: first[0].__init__({'rows': []}),
+                       lambda: first[0]['rows'].__init__(),
+                       lambda: first[0]['rows'].__setitem__(slice(None), [])):
+            with self.assertRaises(TypeError): mutate()
+        self.assertEqual(first[0]['rows'][0]['count'], 3)
+
+    def test_native_snapshot_preserves_shared_subtrees(self):
+        selected = {'tokens': [1, 2, 3]}
+        cache = sources.SourceCache(shared_snapshots=True)
+        value = cache.get(('alias',), lambda: {'selected': selected, 'all': [selected]}, 60)
+        self.assertIs(value['selected'], value['all'][0])
+        self.assertEqual(json.dumps(value), json.dumps({'selected': selected, 'all': [selected]}))
+
     def test_expiry_force_and_mutation_isolation(self):
         now = [0]
         cache = sources.SourceCache(lambda: now[0])

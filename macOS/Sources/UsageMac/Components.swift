@@ -9,6 +9,7 @@ struct Panel<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             PanelHeader(title: title, subtitle: subtitle, facts: facts)
+                .equatable()
                 .padding(.horizontal, 20).padding(.vertical, 12)
                 .background(DashboardTheme.panelStrong)
             DashboardDivider()
@@ -60,23 +61,8 @@ struct LimitMeter: View {
     var stackFooter = false
     var tint: Color = DashboardTheme.accent
     var body: some View {
-        let remaining = used.flatMap { $0.isFinite ? min(100, max(0, 100 - $0)) : nil }
         VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text(title).font(.subheadline.weight(.bold))
-                Spacer()
-                Text(remaining.map { String(format: "%.1f%%", $0) } ?? "—")
-                    .font(.title3.weight(.bold)).monospacedDigit()
-                    .highlightChanges(value: remaining.map { String(format: "%.1f", $0) })
-                if remaining != nil {
-                    Text(language.text("left", "剩余")).font(.caption).foregroundStyle(DashboardTheme.muted)
-                }
-            }
-            ProgressView(value: remaining ?? 0, total: 100)
-                .progressViewStyle(DashboardProgressStyle(color: (used ?? 0) >= 90 ? DashboardTheme.bad
-                    : (used ?? 0) >= 75 ? DashboardTheme.warning : tint))
-                .accessibilityLabel(title)
-                .accessibilityValue(remaining.map { String(format: "%.1f%%", $0) } ?? language.text("Unavailable", "暂无数据"))
+            LimitGauge(title: title, used: used, language: language, tint: tint).equatable()
             if stackFooter {
                 stackedFooter
             } else {
@@ -109,6 +95,35 @@ struct LimitMeter: View {
         Text(language.text("Resets In ", "距重置 ") + LimitFormatting.duration(resetAt.map { $0.timeIntervalSince(now) }, language: language))
             .font(.subheadline.weight(.semibold)).monospacedDigit()
             .help(resetAt.map { dateText($0, language: language) } ?? language.text("Reset time unavailable", "重置时间未知"))
+    }
+}
+
+/// Countdown ticks update the footer without rebuilding the unchanged gauge.
+private struct LimitGauge: View, Equatable {
+    let title: String
+    let used: Double?
+    let language: Language
+    let tint: Color
+
+    var body: some View {
+        let remaining = used.flatMap { $0.isFinite ? min(100, max(0, 100 - $0)) : nil }
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text(title).font(.subheadline.weight(.bold))
+                Spacer()
+                Text(remaining.map { String(format: "%.1f%%", $0) } ?? "—")
+                    .font(.title3.weight(.bold)).monospacedDigit()
+                    .highlightChanges(value: remaining.map { String(format: "%.1f", $0) })
+                if remaining != nil {
+                    Text(language.text("left", "剩余")).font(.caption).foregroundStyle(DashboardTheme.muted)
+                }
+            }
+            ProgressView(value: remaining ?? 0, total: 100)
+                .progressViewStyle(DashboardProgressStyle(color: (used ?? 0) >= 90 ? DashboardTheme.bad
+                    : (used ?? 0) >= 75 ? DashboardTheme.warning : tint))
+                .accessibilityLabel(title)
+                .accessibilityValue(remaining.map { String(format: "%.1f%%", $0) } ?? language.text("Unavailable", "暂无数据"))
+        }
     }
 }
 
@@ -183,7 +198,7 @@ struct SourceSection<Content: View>: View {
         if model.sources.contains(report.source) {
             VStack(alignment: .leading, spacing: 12) {
                 if let error = model.errors[report] { Notice(text: error) }
-                if let data = model.reports[report] {
+                if let data = model.reportState(report).data {
                     content(data)
                 } else if model.pending.contains(report) {
                     HStack { ProgressView().controlSize(.small); Text(model.language.text("Loading…", "正在加载…")) }

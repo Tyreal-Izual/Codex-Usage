@@ -111,6 +111,22 @@ Demo mode reads no account files, starts no helper and saves no preferences.
 UI checks should cover both languages, resizing, keyboard access, source switches,
 export and quit cleanup. Public signing/notarization and automatic updates remain release work.
 
+## Memory checks
+
+Compare Claude aggregation and cache allocations against the pre-optimization commit,
+then build both SwiftUI replay apps with the same options.
+
+```sh
+python3 -B scripts/benchmark_memory.py --baseline-ref 4e6ef98
+source scripts/xcode_env.sh
+python3 -B scripts/benchmark_memory.py --ui-bundle .build/MemoryBefore.app --ui-baseline-ref 4e6ef98
+python3 -B scripts/benchmark_memory.py --ui-bundle .build/MemoryAfter.app
+```
+
+Open each replay app separately. It refreshes synthetic reports, saves memory samples
+beside the bundle and quits. Add `--changing-values --delay-ms 1000` to both builds to
+exercise highlights. Assess multi-day growth separately on a running app.
+
 ## Data boundaries
 
 Codex daily totals are grouped by session start date, not per-event consumption.

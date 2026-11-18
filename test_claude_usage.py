@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+from dataclasses import FrozenInstanceError
 from contextlib import nullcontext
 from pathlib import Path
 import subprocess
@@ -96,6 +97,21 @@ class ClaudeLoginWarningMarkupTest(unittest.TestCase):
 
 
 class ClaudeTranscriptTest(unittest.TestCase):
+    def test_cached_records_share_metadata_without_allowing_counter_mutation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            project = home / 'projects'
+            project.mkdir()
+            file = project / 'one.jsonl'
+            file.write_text('\n'.join(json.dumps(self.usage_row(identifier=str(i))) for i in range(2)))
+            first, second = claude_usage.cached_file_scan(file, home)['records']
+            self.assertIs(first.session_file, second.session_file)
+            self.assertIs(first.model, second.model)
+            self.assertIs(first.project, second.project)
+            with self.assertRaises(FrozenInstanceError):
+                first.usage = first.usage._replace(total_tokens=999)
+            self.assertEqual(claude_usage.aggregate_local_usage(home, 20, 30)['token_totals']['total_tokens'], 30)
+
     @staticmethod
     def usage_row(identifier='message', output=5, cwd='/example', **usage):
         return {'type': 'assistant', 'timestamp': '2026-11-08T10:00:00Z',

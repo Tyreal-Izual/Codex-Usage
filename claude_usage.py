@@ -21,9 +21,10 @@ import subprocess
 import sys
 import threading
 from collections import Counter, defaultdict
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from usage_common import resolve_claude_home, resolve_snapshot_path, find_claude_binary
 
@@ -131,17 +132,42 @@ def usage_key(
     return "fallback=" + "|".join(signature)
 
 
-def prefer_usage_record(candidate: dict[str, Any], previous: dict[str, Any]) -> bool:
+class UsageCounts(NamedTuple):
+    input_tokens: int
+    output_tokens: int
+    cache_creation_input_tokens: int
+    cache_read_input_tokens: int
+    total_tokens: int
+
+
+@dataclass(frozen=True, slots=True)
+class UsageRecord:
+    key: str
+    timestamp: Any
+    date: str
+    model: str
+    project: str
+    session_id: str
+    session_file: str
+    usage: UsageCounts
+
+
+def prefer_usage_record(candidate: UsageRecord, previous: UsageRecord) -> bool:
     """Choose one complete snapshot; never add or mix counters from duplicate rows."""
-    amount, old_amount = candidate["usage"][TOTAL_FIELD], previous["usage"][TOTAL_FIELD]
+    amount, old_amount = candidate.usage.total_tokens, previous.usage.total_tokens
     if amount != old_amount:
         return amount > old_amount
-    date, old_date = parse_timestamp(candidate["timestamp"]), parse_timestamp(previous["timestamp"])
+    date, old_date = parse_timestamp(candidate.timestamp), parse_timestamp(previous.timestamp)
     return date is not None and (old_date is None or date > old_date)
 
 
 def scan_file(file_path: Path, claude_home: Path) -> dict[str, Any]:
-    records: dict[str, dict[str, Any]] = {}
+    records: dict[str, UsageRecord] = {}
+    session_file = str(file_path.relative_to(claude_home))
+    # A file-local pool shares repeated metadata without an ever-growing global intern table.
+    strings: dict[str, str] = {}
+    def shared(value: str) -> str:
+        return strings.setdefault(value, value)
     lines_seen = 0
     parse_errors = 0
     read_failed = False
@@ -173,16 +199,12 @@ def scan_file(file_path: Path, claude_home: Path) -> dict[str, Any]:
                 key = usage_key(obj, message, usage, file_path)
                 timestamp = obj.get("timestamp")
                 cwd = obj.get("cwd") if isinstance(obj.get("cwd"), str) else None
-                record = {
-                    "key": key,
-                    "timestamp": timestamp,
-                    "date": local_date(timestamp),
-                    "model": str(message.get("model") or "unknown"),
-                    "project": cwd or "-",
-                    "session_id": str(obj.get("sessionId") or file_path.stem),
-                    "session_file": str(file_path.relative_to(claude_home)),
-                    "usage": usage,
-                }
+                record = UsageRecord(
+                    key=key, timestamp=timestamp, date=shared(local_date(timestamp)),
+                    model=shared(str(message.get("model") or "unknown")), project=shared(cwd or "-"),
+                    session_id=shared(str(obj.get("sessionId") or file_path.stem)), session_file=session_file,
+                    usage=UsageCounts(*(usage[field] for field in (*TOKEN_FIELDS, TOTAL_FIELD))),
+                )
                 previous = records.get(key)
                 if previous is not None:
                     duplicate_rows += 1
@@ -234,9 +256,9 @@ def cached_file_scan(file_path: Path, claude_home: Path) -> dict[str, Any]:
     return result
 
 
-def add_usage(target: Counter[str], usage: dict[str, int]) -> None:
-    for field in (*TOKEN_FIELDS, TOTAL_FIELD):
-        target[field] += int(usage.get(field) or 0)
+def add_usage(target: Counter[str], usage: UsageCounts) -> None:
+    for field, value in zip((*TOKEN_FIELDS, TOTAL_FIELD), usage):
+        target[field] += value
 
 
 def counter_dict(counter: Counter[str]) -> dict[str, int]:
@@ -261,7 +283,7 @@ def aggregate_local_usage(claude_home: Path, top_n: int, days: int) -> dict[str,
     parse_errors = 0
     usage_rows_seen = 0
     duplicate_rows = 0
-    unique: dict[str, dict[str, Any]] = {}
+    unique: dict[str, UsageRecord] = {}
     latest_record_at: datetime | None = None
 
     with _CACHE_LOCK:
@@ -279,7 +301,7 @@ def aggregate_local_usage(claude_home: Path, top_n: int, days: int) -> dict[str,
                 continue
 
             for record in scanned["records"]:
-                key = record["key"]
+                key = record.key
                 previous = unique.get(key)
                 if previous is not None:
                     duplicate_rows += 1
@@ -288,17 +310,17 @@ def aggregate_local_usage(claude_home: Path, top_n: int, days: int) -> dict[str,
                 unique[key] = record
 
     for record in unique.values():
-        record_at = parse_timestamp(record.get("timestamp"))
+        record_at = parse_timestamp(record.timestamp)
         if record_at is not None and (
             latest_record_at is None or record_at > latest_record_at
         ):
             latest_record_at = record_at
 
-        usage = record["usage"]
-        day = record["date"]
-        model = record["model"]
-        project = record["project"]
-        session_file = record["session_file"]
+        usage = record.usage
+        day = record.date
+        model = record.model
+        project = record.project
+        session_file = record.session_file
 
         add_usage(totals, usage)
         add_usage(daily[day], usage)
@@ -311,19 +333,19 @@ def aggregate_local_usage(claude_home: Path, top_n: int, days: int) -> dict[str,
         add_usage(session_totals[session_file], usage)
         session_totals[session_file]["requests"] += 1
 
-        meta = session_meta.setdefault(
-            session_file,
-            {
+        meta = session_meta.get(session_file)
+        if meta is None:
+            meta = {
                 "date": day,
-                "timestamp": record.get("timestamp"),
+                "timestamp": record.timestamp,
                 "models": set(),
                 "project": project,
-                "session_id": record["session_id"],
-            },
-        )
+                "session_id": record.session_id,
+            }
+            session_meta[session_file] = meta
         meta["models"].add(model)
-        if str(record.get("timestamp") or "") > str(meta.get("timestamp") or ""):
-            meta["timestamp"] = record.get("timestamp")
+        if str(record.timestamp or "") > str(meta.get("timestamp") or ""):
+            meta["timestamp"] = record.timestamp
             meta["date"] = day
             meta["project"] = project
 

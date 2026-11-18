@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Keep each heading on one line when it fits, without hiding metadata when narrow.
-struct PanelHeader: View {
+struct PanelHeader: View, Equatable {
     let title: String
     let subtitle: String
     let facts: [PanelFact]
@@ -10,7 +10,7 @@ struct PanelHeader: View {
         ViewThatFits(in: .horizontal) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 titleLabel.fixedSize()
-                ForEach(facts) { PanelFactBadge(fact: $0).fixedSize() }
+                ForEach(facts) { PanelFactBadge(fact: $0).equatable().fixedSize() }
                 if !subtitle.isEmpty {
                     Spacer(minLength: 8)
                     subtitleLabel.fixedSize()
@@ -18,7 +18,7 @@ struct PanelHeader: View {
             }
             PanelFactsLayout {
                 titleLabel
-                ForEach(facts) { PanelFactBadge(fact: $0) }
+                ForEach(facts) { PanelFactBadge(fact: $0).equatable() }
                 if !subtitle.isEmpty { subtitleLabel }
             }
         }

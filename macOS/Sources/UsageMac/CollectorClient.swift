@@ -1,6 +1,47 @@
 import Foundation
 import Darwin
 
+/// Consume a burst without moving its remaining bytes after every reply.
+struct ReplyBuffer {
+    private var storage = Data()
+    private var cursor = 0
+    private var searchStart = 0
+    let limit: Int
+    init(limit: Int = 32 * 1024 * 1024) { self.limit = limit }
+    var pendingBytes: Int { storage.endIndex - cursor }
+
+    mutating func append(_ data: Data) -> Bool {
+        guard data.count <= limit - pendingBytes else { return false }
+        if cursor > storage.startIndex {
+            let searchedBytes = searchStart - cursor
+            storage.removeSubrange(storage.startIndex..<cursor)
+            cursor = storage.startIndex
+            searchStart = cursor + searchedBytes
+        }
+        storage.append(data)
+        return true
+    }
+
+    mutating func nextLine() -> Data? {
+        guard let end = storage[searchStart...].firstIndex(of: 0x0A) else {
+            // A fragmented reply may span many pipe reads. Only search new bytes next time.
+            searchStart = storage.endIndex
+            return nil
+        }
+        let line = storage.subdata(in: cursor..<end)
+        cursor = storage.index(after: end)
+        searchStart = cursor
+        if cursor == storage.endIndex { reset() }
+        return line
+    }
+
+    mutating func reset() {
+        storage = Data()
+        cursor = storage.startIndex
+        searchStart = cursor
+    }
+}
+
 @MainActor
 protocol CollectorConnection: AnyObject {
     var onDisconnect: ((String) -> Void)? { get set }
@@ -15,7 +56,8 @@ final class CollectorClient: CollectorConnection {
     private var process: Process?
     private var input: FileHandle?
     private var output: FileHandle?
-    private var buffer = Data()
+    private var buffer = ReplyBuffer()
+    private let decoder = JSONDecoder()
     private var nextID = 0
     private var generation = UUID()
     private var pending: [Int: CheckedContinuation<JSONValue, Error>] = [:]
@@ -73,7 +115,7 @@ final class CollectorClient: CollectorConnection {
         task.standardError = FileHandle.nullDevice
         let session = UUID()
         generation = session
-        buffer.removeAll()
+        buffer.reset()
         outgoing.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
             DispatchQueue.main.async {
@@ -146,17 +188,14 @@ final class CollectorClient: CollectorConnection {
     }
 
     private func receive(_ data: Data) {
-        buffer.append(data)
         // Reports contain metadata only. Bound a corrupt/misbehaving helper response.
-        guard buffer.count <= 32 * 1024 * 1024 else {
+        guard buffer.append(data) else {
             disconnected("Collector response exceeded the size limit. Reconnect to try again.")
             return
         }
-        while let end = buffer.firstIndex(of: 0x0A) {
-            let line = Data(buffer[..<end])
-            buffer.removeSubrange(...end)
+        while let line = buffer.nextLine() {
             do {
-                let reply = try JSONDecoder().decode(BridgeReply.self, from: line)
+                let reply = try autoreleasepool { try decoder.decode(BridgeReply.self, from: line) }
                 guard let id = reply.id else {
                     disconnected("Invalid collector response. Reconnect to try again.")
                     return
@@ -233,7 +272,7 @@ final class CollectorClient: CollectorConnection {
         try? output?.close()
         output = nil
         if let task, task.isRunning { task.terminate() }
-        buffer.removeAll()
+        buffer.reset()
         activeReports.removeAll()
         queuedReports.removeAll()
         for id in Array(pending.keys) { finish(id, result: .failure(BridgeError.message(message))) }

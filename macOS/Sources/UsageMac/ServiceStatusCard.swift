@@ -1,6 +1,9 @@
 import SwiftUI
 
-struct ServiceStatusCard: View {
+struct ServiceStatusCard: View, Equatable {
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.status == rhs.status && lhs.language == rhs.language
+    }
     let status: JSONValue
     let language: Language
     @State private var expanded = false

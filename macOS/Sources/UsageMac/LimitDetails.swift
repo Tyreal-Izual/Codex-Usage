@@ -4,7 +4,7 @@ enum FactTone: Equatable {
     case normal, good, warning, bad
 }
 
-struct PanelFact: Identifiable {
+struct PanelFact: Identifiable, Equatable {
     let id: String
     let label: String
     let value: String

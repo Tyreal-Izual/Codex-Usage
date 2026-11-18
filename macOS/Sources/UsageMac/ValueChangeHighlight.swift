@@ -21,8 +21,13 @@ struct ValueChangeFeedback {
 }
 
 extension View {
+    @ViewBuilder
     func highlightChanges(value: String?) -> some View {
-        modifier(ValueChangeHighlight(value: value == "—" || value == "" ? nil : value))
+        if let value, value != "—", !value.isEmpty {
+            modifier(ValueChangeHighlight(value: value))
+        } else {
+            self
+        }
     }
 }
 

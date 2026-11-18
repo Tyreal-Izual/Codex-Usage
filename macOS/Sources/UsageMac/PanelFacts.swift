@@ -1,6 +1,6 @@
 import SwiftUI
 
-struct PanelFactBadge: View {
+struct PanelFactBadge: View, Equatable {
     let fact: PanelFact
     private var valueColor: Color {
         switch fact.tone {
@@ -28,9 +28,17 @@ struct PanelFactBadge: View {
 /// Wrap panel heading elements without truncating values on smaller cards.
 struct PanelFactsLayout: Layout {
     var spacing: CGFloat = 8
+    struct Cache {
+        var width: CGFloat?
+        var measurement: (size: CGSize, frames: [CGRect])?
+    }
+    func makeCache(subviews: Subviews) -> Cache { Cache() }
+    func updateCache(_ cache: inout Cache, subviews: Subviews) { cache = Cache() }
 
-    private func measure(width: CGFloat, subviews: Subviews) -> (size: CGSize, frames: [CGRect]) {
+    private func measure(width: CGFloat, subviews: Subviews, cache: inout Cache) -> (size: CGSize, frames: [CGRect]) {
+        if cache.width == width, let measurement = cache.measurement { return measurement }
         var frames: [CGRect] = []
+        frames.reserveCapacity(subviews.count)
         var x: CGFloat = 0, y: CGFloat = 0, rowHeight: CGFloat = 0
         var rowStart = 0
         func centerRow() {
@@ -51,17 +59,20 @@ struct PanelFactsLayout: Layout {
             rowHeight = max(rowHeight, size.height)
         }
         centerRow()
-        return (CGSize(width: width, height: y + rowHeight), frames)
+        let measurement = (CGSize(width: width, height: y + rowHeight), frames)
+        cache.width = width
+        cache.measurement = measurement
+        return measurement
     }
 
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) -> CGSize {
         guard !subviews.isEmpty else { return .zero }
-        let ideal = subviews.reduce(CGFloat(0)) { $0 + $1.sizeThatFits(.unspecified).width + spacing } - spacing
-        let width = proposal.width.flatMap { $0.isFinite ? max(0, $0) : nil } ?? ideal
-        return measure(width: width, subviews: subviews).size
+        let width = proposal.width.flatMap { $0.isFinite ? max(0, $0) : nil }
+            ?? (subviews.reduce(CGFloat(0)) { $0 + $1.sizeThatFits(.unspecified).width + spacing } - spacing)
+        return measure(width: width, subviews: subviews, cache: &cache).size
     }
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        let frames = measure(width: bounds.width, subviews: subviews).frames
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) {
+        let frames = measure(width: bounds.width, subviews: subviews, cache: &cache).frames
         for (index, view) in subviews.enumerated() {
             let frame = frames[index]
             view.place(at: CGPoint(x: bounds.minX + frame.minX, y: bounds.minY + frame.minY),

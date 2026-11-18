@@ -30,10 +30,54 @@ def resolve_sources(value: str, codex_home: Path) -> frozenset[str]:
     return enabled
 
 
+def _read_only(*args: Any, **kwargs: Any) -> None:
+    raise TypeError("Cached snapshots are read-only")
+
+
+class _SnapshotDict(dict):
+    __slots__ = ()
+    __init__ = _read_only
+    __setitem__ = __delitem__ = clear = pop = popitem = setdefault = update = __ior__ = _read_only
+
+
+class _SnapshotList(list):
+    __slots__ = ()
+    __init__ = _read_only
+    __setitem__ = __delitem__ = append = clear = extend = insert = pop = remove = reverse = sort = __iadd__ = __imul__ = _read_only
+
+
+def _snapshot(value: Any, memo: dict[int, Any] | None = None) -> Any:
+    """Own one immutable container tree; JSON encoding still sees ordinary dict/list types."""
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if memo is None:
+        memo = {}
+    identity = id(value)
+    if identity in memo:
+        return memo[identity]
+    if isinstance(value, dict):
+        result = _SnapshotDict.__new__(_SnapshotDict)
+        memo[identity] = result
+        for key, item in value.items():
+            dict.__setitem__(result, key, _snapshot(item, memo))
+        return result
+    if isinstance(value, list):
+        result = _SnapshotList.__new__(_SnapshotList)
+        memo[identity] = result
+        list.extend(result, (_snapshot(item, memo) for item in value))
+        return result
+    if isinstance(value, tuple):
+        result = tuple(_snapshot(item, memo) for item in value)
+        memo[identity] = result
+        return result
+    raise TypeError(f"Unsupported snapshot value: {type(value).__name__}")
+
+
 class SourceCache:
     """Coalesce each source independently; never expose mutable cached objects."""
-    def __init__(self, clock: Callable[[], float] = time.monotonic) -> None:
+    def __init__(self, clock: Callable[[], float] = time.monotonic, *, shared_snapshots: bool = False) -> None:
         self._clock = clock
+        self._shared_snapshots = shared_snapshots
         self._condition = threading.Condition()
         self._entries: dict[tuple[Any, ...], tuple[float, Any]] = {}
         self._inflight: set[tuple[Any, ...]] = set()
@@ -47,13 +91,14 @@ class SourceCache:
             self._entries = {k: v for k, v in self._entries.items() if v[0] > now}
             cached = self._entries.get(key)
             if cached is not None and not force:
-                return copy.deepcopy(cached[1])
+                return cached[1] if self._shared_snapshots else copy.deepcopy(cached[1])
             self._inflight.add(key)
         try:
             result = collect()
+            saved = _snapshot(result) if self._shared_snapshots else copy.deepcopy(result)
             with self._condition:
-                self._entries[key] = (self._clock() + seconds, copy.deepcopy(result))
-            return result
+                self._entries[key] = (self._clock() + seconds, saved)
+            return saved if self._shared_snapshots else result
         finally:
             with self._condition:
                 self._inflight.discard(key)

@@ -7,13 +7,13 @@ struct DashboardView: View {
     @State private var selection: Destination? = .overview
     @State private var initialLimitsPositionPending = true
     @State private var exporting = false
-    @State private var exportDocument = SnapshotDocument()
+    @State private var exportDocument: SnapshotDocument?
     @State private var exportError: String?
     private var language: Language { model.language }
     private let codexLimitsID = "codex-limits"
     private var hasCodexLimits: Bool {
         [.overview, .codex].contains(selection ?? .overview)
-            && model.sources.contains("codex") && model.reports[.online] != nil
+            && model.sources.contains("codex") && model.loadedReports.contains(.online)
     }
 
     var body: some View {
@@ -47,7 +47,7 @@ struct DashboardView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
-                        heading
+                        DashboardHeading(model: model, destination: selection ?? .overview)
                         if let error = model.connectionError {
                             Panel(title: language.text("Connection needs attention", "采集连接需要处理")) {
                                 Notice(text: error)
@@ -96,46 +96,24 @@ struct DashboardView: View {
             .background(DashboardTheme.background)
             .navigationTitle((selection ?? .overview).title(language))
             .toolbar {
-                ToolbarItemGroup {
-                    if model.offersReconnect {
-                        Button { Task { await model.reconnect() } } label: {
-                            Label(language.text("Reconnect", "重新连接"), systemImage: "arrow.triangle.2.circlepath")
-                        }.disabled(model.connecting)
-                    }
-                    if !model.pending.isEmpty { ProgressView().controlSize(.small).help(language.text("Refreshing sources", "正在刷新来源")) }
-                    Button { model.refresh(force: true) } label: { Label(language.text("Refresh", "刷新"), systemImage: "arrow.clockwise") }
-                        .keyboardShortcut("r").disabled(!model.canRefresh)
-                    Button {
-                        do { exportDocument = SnapshotDocument(data: try model.exportData()); exporting = true }
-                        catch { exportError = error.localizedDescription }
-                    } label: { Label(language.text("Export JSON", "导出 JSON"), systemImage: "square.and.arrow.up") }
-                    .disabled(model.reports.isEmpty)
+                DashboardToolbar(model: model) {
+                    do { exportDocument = SnapshotDocument(data: try model.exportData()); exporting = true }
+                    catch { exportError = error.localizedDescription }
                 }
             }
         }
         .frame(minWidth: 760, minHeight: 560)
         .background(DashboardTheme.background)
-        .fileExporter(isPresented: $exporting, document: exportDocument, contentType: .json,
+        .fileExporter(isPresented: $exporting, document: exportDocument, contentTypes: [.json],
                       defaultFilename: "usage-\(Date().formatted(.iso8601.year().month().day().dateSeparator(.dash)))") { result in
+            exportDocument = nil
             if case .failure(let error) = result { exportError = error.localizedDescription }
+        } onCancellation: {
+            exportDocument = nil
         }
         .alert(language.text("Export failed", "导出失败"), isPresented: Binding(get: { exportError != nil }, set: { if !$0 { exportError = nil } })) {
             Button(language.text("OK", "好")) { exportError = nil }
         } message: { Text(exportError ?? "") }
-    }
-
-    private var heading: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            Text((selection ?? .overview).title(language)).font(.largeTitle.weight(.semibold))
-            HStack(spacing: 8) {
-                if model.demo { Text(language.text("Preview with sample data", "使用样例数据预览")) }
-                else if let updated = model.updated.values.max() {
-                    Text(language.text("Updated", "更新于"))
-                    Text(updated, style: .time)
-                } else { Text(language.text("Your limits, tokens and sessions in one place.", "集中查看额度、token 与会话。")) }
-                if !model.pending.isEmpty { Text("· \(model.pending.count) " + language.text("loading", "项加载中")) }
-            }.font(.subheadline).foregroundStyle(DashboardTheme.muted)
-        }
     }
 
     @ViewBuilder private var content: some View {
@@ -150,20 +128,20 @@ struct DashboardView: View {
             case .overview:
                 overview
             case .codex:
-                SourceSection(report: .online, model: model) { CodexLimits(data: $0, language: language) }
+                SourceSection(report: .online, model: model) { CodexLimits(data: $0, language: language).equatable() }
                     .id(codexLimitsID)
                 SourceSection(report: .local, model: model) { LocalDetails(data: $0, claude: false, language: language) }
-                SourceSection(report: .resets, model: model) { ResetCredits(data: $0, language: language) }
+                SourceSection(report: .resets, model: model) { ResetCredits(data: $0, language: language).equatable() }
                 SourceSection(report: .online, model: model) { ProfileStatistics(data: $0, language: language) }
             case .claude:
                 SourceSection(report: .claude, model: model) {
-                    ClaudeLimits(data: $0, language: language)
+                    ClaudeLimits(data: $0, language: language).equatable()
                     LocalDetails(data: $0, claude: true, language: language)
                 }
             case .radar:
                 SourceSection(report: .radar, model: model) { RadarView(snapshot: $0, language: language) }
             case .isambard:
-                SourceSection(report: .isambard, model: model) { IsambardView(data: $0, language: language) }
+                SourceSection(report: .isambard, model: model) { IsambardView(data: $0, language: language).equatable() }
             case .api:
                 SourceSection(report: .api, model: model) { AdminView(data: $0, language: language) }
             }
@@ -177,13 +155,13 @@ struct DashboardView: View {
                                        description: Text(language.text("Enable Codex, Claude or public sources in Settings.", "在设置中启用 Codex、Claude 或公共数据来源。")))
             }
             SourceSection(report: .online, model: model) {
-                CodexLimits(data: $0, language: language)
+                CodexLimits(data: $0, language: language).equatable()
             }
             .id(codexLimitsID)
             SourceSection(report: .claude, model: model) {
-                ClaudeLimits(data: $0, language: language)
+                ClaudeLimits(data: $0, language: language).equatable()
             }
-            SourceSection(report: .isambard, model: model) { IsambardView(data: $0, language: language, maintenance: false) }
+            SourceSection(report: .isambard, model: model) { IsambardView(data: $0, language: language, maintenance: false).equatable() }
             EqualWidthCardsLayout(minimumColumnWidth: 400) {
                 if model.sources.contains("claude") {
                     SourceSection(report: .claude, model: model, fillHeight: true) { data in
@@ -211,8 +189,51 @@ struct DashboardView: View {
                     }
                 }
             }
-            SourceSection(report: .resets, model: model) { ResetCredits(data: $0, language: language) }
+            SourceSection(report: .resets, model: model) { ResetCredits(data: $0, language: language).equatable() }
             SourceSection(report: .radar, model: model) { RadarView(snapshot: $0, language: language) }
+        }
+    }
+}
+
+private struct DashboardHeading: View {
+    let model: DashboardModel
+    let destination: Destination
+    private var language: Language { model.language }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(destination.title(language)).font(.largeTitle.weight(.semibold))
+            HStack(spacing: 8) {
+                if model.demo { Text(language.text("Preview with sample data", "使用样例数据预览")) }
+                else if let updated = model.updated.values.max() {
+                    Text(language.text("Updated", "更新于"))
+                    Text(updated, style: .time)
+                } else { Text(language.text("Your limits, tokens and sessions in one place.", "集中查看额度、token 与会话。")) }
+                if !model.pending.isEmpty { Text("· \(model.pending.count) " + language.text("loading", "项加载中")) }
+            }.font(.subheadline).foregroundStyle(DashboardTheme.muted)
+        }
+    }
+}
+
+private struct DashboardToolbar: ToolbarContent {
+    let model: DashboardModel
+    let onExport: () -> Void
+    private var language: Language { model.language }
+    var body: some ToolbarContent {
+        ToolbarItemGroup {
+            if model.offersReconnect {
+                Button { Task { await model.reconnect() } } label: {
+                    Label(language.text("Reconnect", "重新连接"), systemImage: "arrow.triangle.2.circlepath")
+                }.disabled(model.connecting)
+            }
+            if !model.pending.isEmpty {
+                ProgressView().controlSize(.small).help(language.text("Refreshing sources", "正在刷新来源"))
+            }
+            Button { model.refresh(force: true) } label: {
+                Label(language.text("Refresh", "刷新"), systemImage: "arrow.clockwise")
+            }.keyboardShortcut("r").disabled(!model.canRefresh)
+            Button(action: onExport) {
+                Label(language.text("Export JSON", "导出 JSON"), systemImage: "square.and.arrow.up")
+            }.disabled(!model.hasReports)
         }
     }
 }
@@ -231,8 +252,8 @@ private struct LimitsNavigationButtonStyle: ButtonStyle {
 
 struct SnapshotDocument: FileDocument {
     static var readableContentTypes: [UTType] { [.json] }
-    var data = Data()
-    init(data: Data = Data()) { self.data = data }
+    let data: Data
+    init(data: Data) { self.data = data }
     init(configuration: ReadConfiguration) throws { data = configuration.file.regularFileContents ?? Data() }
     func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper { FileWrapper(regularFileWithContents: data) }
 }

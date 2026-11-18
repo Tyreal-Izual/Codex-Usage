@@ -1,20 +1,27 @@
 import SwiftUI
 
-struct CodexLimits: View {
-    let data: JSONValue
+struct CodexLimits: View, Equatable {
+    private let endpoint: JSONValue
+    private let collected: Date?
     let language: Language
     var fillHeight = false
-    private var rate: JSONValue { data["endpoints"]["rate_limit_status"]["data"] }
+    private var rate: JSONValue { endpoint["data"] }
+
+    init(data: JSONValue, language: Language, fillHeight: Bool = false) {
+        endpoint = data["endpoints"]["rate_limit_status"]
+        collected = LimitFormatting.retrievedAt(data)
+        self.language = language
+        self.fillHeight = fillHeight
+    }
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 30)) { timeline in
             let windows = LimitWindows(rate["rate_limit"])
-            let collected = LimitFormatting.retrievedAt(data)
             Panel(title: language.text("Codex Online Rate Limits", "Codex 在线额度"),
                   subtitle: language.text("Read-only backend endpoints", "只读后端接口"),
                   facts: facts(now: timeline.date), fillHeight: fillHeight) {
-                if data["endpoints"]["rate_limit_status"]["ok"].flag == false {
-                    Notice(text: data["endpoints"]["rate_limit_status"]["error"].errorText)
+                if endpoint["ok"].flag == false {
+                    Notice(text: endpoint["error"].errorText)
                 }
                 EqualWidthCardsLayout(minimumColumnWidth: 300, spacing: 12) {
                     LimitMeter(title: language.text("Primary Window", "主额度窗口"),
@@ -37,7 +44,6 @@ struct CodexLimits: View {
 
     private func facts(now: Date) -> [PanelFact] {
         let reached = rate["rate_limit"]["limit_reached"]
-        let collected = LimitFormatting.retrievedAt(data)
         return [
             PanelFact(id: "plan", label: language.text("Plan", "套餐"), value: rate["plan_type"].display(locale: language.locale)),
             PanelFact(id: "reached", label: language.text("Limit Reached", "达到上限"),
@@ -53,11 +59,16 @@ struct CodexLimits: View {
     }
 }
 
-struct ClaudeLimits: View {
-    let data: JSONValue
+struct ClaudeLimits: View, Equatable {
+    private let rate: JSONValue
     let language: Language
     var fillHeight = false
-    private var rate: JSONValue { data["rate_limits"] }
+
+    init(data: JSONValue, language: Language, fillHeight: Bool = false) {
+        rate = data["rate_limits"]
+        self.language = language
+        self.fillHeight = fillHeight
+    }
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 30)) { timeline in

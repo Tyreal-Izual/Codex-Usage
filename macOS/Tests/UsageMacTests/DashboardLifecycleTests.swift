@@ -1,7 +1,49 @@
 import XCTest
+import Observation
 @testable import UsageMac
 
 final class DashboardLifecycleTests: XCTestCase {
+    @MainActor
+    func testSourceObservationIsIsolatedAndFullExportRetainsEveryField() async throws {
+        let model = DashboardModel(demo: true)
+        await model.start()
+        defer { model.stop() }
+        let unrelated = expectation(description: "Local updates must not invalidate Claude")
+        unrelated.isInverted = true
+        withObservationTracking { _ = model.reportState(.claude).data } onChange: { unrelated.fulfill() }
+        let value: JSONValue = .object(["extra": .array([.integer(42), .string("preserved")])])
+        model.reports[.local] = value
+        await fulfillment(of: [unrelated], timeout: 0.05)
+        XCTAssertTrue(model.loadedReports.contains(.local))
+        let exported = try JSONDecoder().decode(JSONValue.self, from: model.exportData())
+        XCTAssertEqual(exported["reports"]["local-usage"], value)
+        model.reports.removeValue(forKey: .local)
+        XCTAssertNil(model.reportState(.local).data)
+        XCTAssertFalse(model.loadedReports.contains(.local))
+    }
+
+    @MainActor
+    func testUnchangedReportStillRefreshesWithoutInvalidatingReportObservers() async throws {
+        let fixture = ModelFixture()
+        defer { fixture.close() }
+        await fixture.model.start()
+        let ready = await eventually { fixture.model.canRefresh }
+        XCTAssertTrue(ready)
+        let before = fixture.model.reports[.local]
+        let checkedAt = fixture.model.updated[.local]
+        let requests = fixture.client.requests.count
+        let changed = expectation(description: "Unchanged data must not invalidate report views")
+        changed.isInverted = true
+        withObservationTracking { _ = fixture.model.reports[.local] } onChange: { changed.fulfill() }
+        fixture.model.refresh(reports: [.local])
+        let refreshed = await eventually { fixture.model.canRefresh }
+        XCTAssertTrue(refreshed)
+        await fulfillment(of: [changed], timeout: 0.05)
+        XCTAssertEqual(fixture.client.requests.count, requests + 1)
+        XCTAssertEqual(fixture.model.reports[.local], before)
+        XCTAssertNotEqual(fixture.model.updated[.local], checkedAt)
+    }
+
     @MainActor
     func testIsolatedTimeoutKeepsPollingAndRecoveryUntilNextReply() async throws {
         let fixture = ModelFixture()
