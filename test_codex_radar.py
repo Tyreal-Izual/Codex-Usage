@@ -69,12 +69,13 @@ def bench_fixtures():
     return binding, summaries
 
 
-def degradation_html(score=107.3):
+def degradation_html(score=107.3, *, expanded=False):
+    models = (("gpt-6.2-astra", "gpt-6.2-sol") if expanded else ()) + radar.V7_MODELS
     rows = ''.join(f'<button data-cir-setting="{model}:{effort}"><span><strong>{score}</strong>'
                    '<span data-cir-cost>999.99</span></span></button>'
-                   for model, efforts in radar.DEGRADATION_EFFORTS.items() for effort in efforts)
+                   for model in models for effort in (radar.EFFORTS[:-1] if "luna" in model else radar.EFFORTS))
     return ('<html><body><section id="stationmaster-round" data-intelligence-ui>'
-            '<link rel="stylesheet" href="ignored.css"><p class="cir-meta">4 个分项 · 46 档 · 总分150</p>'
+            f'<link rel="stylesheet" href="ignored.css"><p class="cir-meta">4 个分项 · {58 if expanded else 46} 档 · 总分150</p>'
             '<p class="cir-test-time">本轮测试：2026-10-31 13:31–16:53（北京时间）</p>'
             '<div data-cir-panel="total"><table><caption>总分 /150 · 费用</caption><tbody><tr><td>'
             + rows + '</td></tr></tbody></table></div>'
@@ -97,6 +98,21 @@ class DegradationTest(unittest.TestCase):
         self.assertIn('gpt-5.6-terra', {p['model'] for p in result['points']})
         self.assertNotIn('999.99', json.dumps(result))
         self.assertNotIn('ignored.css', json.dumps(result))
+
+    def test_expanded_catalog_and_explicit_overnight_period(self):
+        html = degradation_html(expanded=True).replace(
+            '2026-10-31 13:31–16:53', '2026-11-23 17:54–2026-11-24 00:55')
+        snapshot = radar.degradation_snapshot(html)
+        self.assertTrue(radar.validate_degradation_snapshot(snapshot))
+        self.assertEqual(snapshot['configuration_count'], 58)
+        self.assertEqual(snapshot['source_updated_at'], '2026-11-23T16:55:00+00:00')
+        for model in ('gpt-6.2-astra', 'gpt-6.2-sol'):
+            self.assertEqual({p['effort'] for p in snapshot['points'] if p['model'] == model}, set(radar.EFFORTS))
+        for invalid in (html.replace('58 档', '57 档'), html.replace('11-24 00:55', '11-22 00:55')):
+            with self.assertRaises(ValueError):
+                radar.degradation_snapshot(invalid)
+        snapshot['points'].pop()
+        self.assertFalse(radar.validate_degradation_snapshot(snapshot))
 
     def test_missing_and_zero_remain_distinct(self):
         for text, expected in (('—', None), ('0', 0), ('150.00', 150)):
@@ -515,6 +531,21 @@ class ServiceTest(unittest.TestCase):
         if os.name == "posix":
             self.assertEqual(self.path.stat().st_mode & 0o777, 0o600)
 
+    def test_v7_cache_survives_offline_upgrade_then_accepts_expanded_round(self):
+        previous = degradation_fixture()
+        del previous['configuration_count']
+        self.path.write_text(json.dumps({'schema_version': 7, 'snapshot': previous,
+            'fetched_at_epoch': self.now - 600, 'next_attempt_at_epoch': self.now + 3600}))
+        service = radar.RadarService(self.path, clock=lambda: self.now, fetcher=self.fetch)
+        self.error = ValueError('offline')
+        self.assertFalse(service.refresh_if_due())
+        self.assertEqual(service.snapshot()['data']['points'], previous['points'])
+        service._fetcher = lambda _: radar.degradation_snapshot(degradation_html(expanded=True))
+        self.now += radar.RETRY_SECONDS
+        self.assertTrue(service.refresh_if_due())
+        self.assertFalse(service.snapshot()['stale'])
+        self.assertEqual(len(radar.RadarService(self.path, clock=lambda: self.now).snapshot()['data']['points']), 58)
+
     def test_failure_preserves_snapshot_and_persists_retry_backoff(self):
         self.service.refresh_if_due()
         before = self.service.snapshot()
@@ -817,8 +848,8 @@ class RadarRendererTest(unittest.TestCase):
         html = self.render_script('process.stdout.write(benchCards('+json.dumps(snapshot['points'])+'));')
         tree = ET.fromstring('<root>'+html+'</root>')
         cards = {b.get('data-radar-card'): b for b in tree.findall('./div/div/button')}
-        for index, value in enumerate(values):
-            card = cards[str(index)]
+        for point, value in zip(snapshot['points'], values):
+            card = cards[f"{point['model']}:{point['effort']}"]
             meter = card.find("span[@aria-hidden='true']")
             fill = meter.find('span')
             if value is None:
@@ -854,6 +885,16 @@ class RadarRendererTest(unittest.TestCase):
                 self.assertNotIn(removed, html)
         self.assertIn('分数和条 = 官网总分 / 满分 150', result[1])
 
+    def test_web_cards_follow_new_models_and_keep_effort_columns(self):
+        points = radar.degradation_snapshot(degradation_html(expanded=True))['points']
+        points.append({'model': 'gpt-9-example', 'effort': 'low', 'score': None})
+        html = self.render_script('process.stdout.write(benchCards('+json.dumps(points)+'));')
+        tree = ET.fromstring('<root>'+html+'</root>')
+        families = {family.findtext('h3'): family.findall('./div/button') for family in tree}
+        self.assertEqual(len(families['GPT-6.2 Astra']), 6)
+        self.assertEqual(len(families['GPT-6.2 Sol']), 6)
+        self.assertIn('--score-column:6', families['gpt-9-example'][0].get('style'))
+
     def test_loading_failure_and_legacy_payload_never_render_old_scores(self):
         old = radar.combine_snapshots(*fixtures())
         current = degradation_fixture()
@@ -882,11 +923,11 @@ class RadarRendererTest(unittest.TestCase):
         html = self.render_script('process.stdout.write(benchCards('+json.dumps(snapshot['points'])+'));')
         tree = ET.fromstring('<root>'+html+'</root>')
         buttons = tree.findall('./div/div/button')
-        by_index = {b.get('data-radar-card'):b for b in buttons}
-        self.assertEqual(by_index['0'].findtext('strong'), '—')
-        self.assertIn('Not tested', by_index['0'].get('aria-label'))
-        self.assertEqual(by_index['1'].findtext('strong'), '0.00')
-        self.assertNotIn('Not tested', by_index['1'].get('aria-label'))
+        cards = {b.get('data-radar-card'):b for b in buttons}
+        self.assertEqual(cards['gpt-6.1-sol:low'].findtext('strong'), '—')
+        self.assertIn('Not tested', cards['gpt-6.1-sol:low'].get('aria-label'))
+        self.assertEqual(cards['gpt-6.1-sol:medium'].findtext('strong'), '0.00')
+        self.assertNotIn('Not tested', cards['gpt-6.1-sol:medium'].get('aria-label'))
 
 
 class RadarAPITest(unittest.TestCase):

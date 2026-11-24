@@ -9,7 +9,7 @@ It is enabled by default and can be paused in Settings.
 ## Data and display
 
 - The adapter targets the four-task assessment (Qin Shi Huang, Pompeii, Pelican,
-  Candy), with 46 configurations. Totals are read directly, not recomputed.
+  Candy). It reads published totals and checks the number of model/effort pairs against the page heading.
 - Cards use two decimals and a fixed **score / 150** bar, with gaps at 50 and 100.
   A colored top edge becomes a full outline on hover. Zero is `0.00`; an unscored
   configuration is `—`. Old IQ/RadarBench snapshots are not valid fallback data.

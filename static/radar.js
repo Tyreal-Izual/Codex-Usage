@@ -1,5 +1,6 @@
     const CodexRadar = (() => {
       const models = {
+        "gpt-6.2-astra": ["GPT-6.2 Astra", "#fb7185"], "gpt-6.2-sol": ["GPT-6.2 Sol", "#4ade80"],
         "gpt-6-astra": ["GPT-6 Astra", "#f97316"],
         "gpt-6.1-sol": ["GPT-6.1 Sol", "#fde047"],
         "gpt-6.1-terra": ["GPT-6.1 Terra", "#38bdf8"],
@@ -7,7 +8,7 @@
         "gpt-5.6-sol": ["GPT-5.6 Sol", "#eab308"], "gpt-5.6-terra": ["GPT-5.6 Terra", "#60a5fa"], "gpt-5.6-luna": ["GPT-5.6 Luna", "#c7d2e0"]
       };
       const efforts = ["low", "medium", "high", "xhigh", "max", "ultra"];
-      const benchEfforts = __RADAR_BENCH_EFFORTS__;
+      const modelName = model => models[model]?.[0] ?? model;
       const words = {
         en: {title:"Codex Radar", subtitle:"Degradation radar · Score / 150",
           source:"Source: Codex Radar ↗", sync:"Synced", through:"Source data", next:"Next check", cadence:"Sync every 4 hours",
@@ -24,7 +25,7 @@
           cache:"最新数据暂未保存到磁盘。", refreshing:"正在同步…",
           table:"查看完整数据", model:"模型", effort:"推理档位", hint:"悬停、点击或用键盘聚焦卡片查看雷达分。"}
       };
-      let visiblePoints = [], root = null, lang = "en", payload = null, formatAge = null;
+      let root = null, lang = "en", payload = null, formatAge = null;
       let pending = false, checkedAt = 0, timer = null, localError = false, tableOpen = false, signature = "";
       const esc = (v) => String(v ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"}[c]));
       const t = (key) => words[lang][key];
@@ -46,35 +47,33 @@
         const percent=known?Math.max(0,Math.min(100,value/150*100)):0;
         return `<span class="radar-meter${known?'':' radar-meter--missing'}" aria-hidden="true">${known?`<span class="radar-meter-fill" style="width:${percent.toFixed(4)}%"></span>`:''}</span>`;
       }
-      const benchPointText = p => `${models[p.model][0]} · ${p.effort} · ${bt('score')} ${scoreText(p.score)} / 150${p.score==null?' · '+bt('missing'):''}`;
+      const benchPointText = p => `${modelName(p.model)} · ${p.effort} · ${bt('score')} ${scoreText(p.score)} / 150${p.score==null?' · '+bt('missing'):''}`;
       function benchCards(points) {
-        return Object.entries(benchEfforts).map(([model, supported])=>{
+        return [...new Set(points.map(p=>p.model))].map(model=>{
           const family=points.filter(p=>p.model===model);
-          return `<div class="radar-family"><h3>${models[model][0]}</h3><div class="radar-scores">${supported.slice().reverse().map(effort=>{
+          return `<div class="radar-family"><h3>${esc(modelName(model))}</h3><div class="radar-scores">${efforts.slice().reverse().map(effort=>{
             const p=family.find(p=>p.effort===effort);
             if(!p) return '';
-            return `<button type="button" class="radar-score" style="--series-color:${models[model][1]};--score-column:${efforts.length-efforts.indexOf(effort)}" data-radar-card="${points.indexOf(p)}" aria-label="${esc(benchPointText(p))}"><span class="radar-score-heading"><span>${effort}</span></span><strong>${scoreText(p.score)}</strong>${scoreMeter(p.score)}</button>`;
+            return `<button type="button" class="radar-score" style="--series-color:${models[model]?.[1] ?? "#46d3b8"};--score-column:${efforts.length-efforts.indexOf(effort)}" data-radar-card="${esc(model)}:${effort}" aria-label="${esc(benchPointText(p))}"><span class="radar-score-heading"><span>${effort}</span></span><strong>${scoreText(p.score)}</strong>${scoreMeter(p.score)}</button>`;
           }).join('')}</div></div>`;
         }).join('');
       }
       function renderBench() {
         const data=payload?.data?.benchmark_kind==='codex-four-task-degradation-150'?payload.data:null, points=data?.points||[];
-        visiblePoints=points;
         const key=JSON.stringify([payload,lang,localError,Math.round(root.clientWidth)]);
         if(signature===key) return;
         signature=key;
         const focused=document.activeElement;
-        const focusAttr=['data-radar-card'].find(attr=>root.contains(focused)&&focused.hasAttribute(attr));
-        const focusValue=focusAttr?focused.getAttribute(focusAttr):null;
+        const focusedCard=root.contains(focused)?focused.dataset?.radarCard:null;
         const focusSummary=root.contains(focused)&&focused.matches('summary');
         const warning=localError?t('failed'):payload?.stale?t('stale'):payload?.cache_warning?t('cache'):'';
         const toolbar=`<div class="radar-toolbar"><strong>${bt('name')} · ${bt('score')}</strong><a class="radar-source" href="https://codexradar.com/#stationmaster-round" target="_blank" rel="noopener noreferrer">${t('source')}</a></div><div class="radar-meta">${t('cadence')} · ${t('sync')}: ${date(payload?.fetched_at)} · ${bt('through')}: ${date(data?.source_started_at)} – ${date(data?.source_updated_at)} · ${t('next')}: ${date(payload?.next_attempt_at)}${payload?.refreshing?' · '+t('refreshing'):''}</div>${warning?`<p class="radar-warning" role="status">${warning}</p>`:''}`;
         if(!data) {root.innerHTML=toolbar+`<div class="empty" role="status">${payload?.last_error||localError?t('unavailable'):t('loading')}</div>`;return;}
-        const rows=points.map(p=>[models[p.model][0],p.effort,scoreText(p.score)]);
+        const rows=points.map(p=>[modelName(p.model),p.effort,scoreText(p.score)]);
         const table=(headers,rows)=>`<div class="table-wrap"><table><thead><tr>${headers.map(v=>`<th>${esc(v)}</th>`).join('')}</tr></thead><tbody>${rows.map(row=>`<tr>${row.map(v=>`<td>${esc(v)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
         root.innerHTML=toolbar+`<p class="radar-formula">${bt('scale')}</p>${benchCards(points)}<div class="radar-detail" aria-live="polite">${t('hint')}</div><details class="radar-table" ${tableOpen?'open':''}><summary>${t('table')} · ${points.length}</summary>${table([t('model'),t('effort'),bt('score')],rows)}<p class="radar-formula">${bt('note')}</p></details>`;
         root.querySelector('details').addEventListener('toggle',e=>{tableOpen=e.target.open;});
-        if(focusAttr) root.querySelector(`[${focusAttr}="${focusValue}"]`)?.focus({preventScroll:true});
+        if(focusedCard) root.querySelector(`[data-radar-card="${CSS.escape(focusedCard)}"]`)?.focus({preventScroll:true});
         else if(focusSummary) root.querySelector('summary')?.focus({preventScroll:true});
       }
       function render() {
@@ -118,8 +117,7 @@
             const inspect=e=>{
               const marker=e.target.closest('[data-radar-card]');
               if (!marker) return;
-              const p=visiblePoints[Number(marker.dataset.radarCard)];
-              if (p) root.querySelector('.radar-detail').textContent=benchPointText(p);
+              root.querySelector('.radar-detail').textContent=marker.getAttribute('aria-label');
             };
             ['pointerover','focusin','click'].forEach(event=>root.addEventListener(event,inspect));
           }

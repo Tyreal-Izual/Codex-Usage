@@ -30,7 +30,7 @@ SOURCE_URL = "https://codexradar.com/"
 METRICS_URL = SOURCE_URL + "api/intelligence-efficiency-metrics"
 VISUAL_URL = SOURCE_URL + "api/visual-spatial-reasoning"
 COVERAGE_URL = SOURCE_URL + "api/intelligence-efficiency-coverage"
-CACHE_VERSION = 7
+CACHE_VERSION = 8
 REFRESH_SECONDS = 4 * 60 * 60
 RETRY_SECONDS = 15 * 60
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
@@ -397,13 +397,10 @@ def bench_snapshot(binding: dict[str, Any], summaries: list[dict[str, Any]]) -> 
 
 
 DEGRADATION_KIND = "codex-four-task-degradation-150"
-DEGRADATION_MODELS = {
-    "gpt-6.1-sol": "GPT-6.1 Sol", "gpt-6-astra": "GPT-6 Astra",
-    "gpt-6.1-terra": "GPT-6.1 Terra", "gpt-6-sol": "GPT-6 Sol",
-    "gpt-6-luna": "GPT-6 Luna", "gpt-5.6-sol": "GPT-5.6 Sol",
-    "gpt-5.6-terra": "GPT-5.6 Terra", "gpt-5.6-luna": "GPT-5.6 Luna",
-}
-DEGRADATION_EFFORTS = {m: EFFORTS[:-1] if "luna" in m else EFFORTS for m in DEGRADATION_MODELS}
+# Version 7 snapshots predate the published configuration count.
+V7_MODELS = ("gpt-6.1-sol", "gpt-6-astra", "gpt-6.1-terra", "gpt-6-sol",
+             "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna")
+MODEL_ID = re.compile(r"gpt-[0-9]+(?:\.[0-9]+)*(?:-[a-z0-9]+)*", re.ASCII)
 REQUEST_TIMEOUT = 20
 REQUEST_RETRY_DELAYS = (1, 3)
 
@@ -479,26 +476,31 @@ def degradation_snapshot(html: str) -> dict[str, Any]:
     parser.close()
     if parser.stack or parser.roots != 1 or parser.panels != 1:
         raise ValueError("Missing, duplicate or truncated degradation score panel")
-    headings = [block for block in parser.meta if re.fullmatch(
-        r"\s*4\s*个分项\s*·\s*46\s*档\s*·\s*总分\s*150\s*", "".join(block))]
+    heading = re.compile(r"\s*4\s*个分项\s*·\s*([0-9]{1,4})\s*档\s*·\s*总分\s*150\s*")
+    headings = [m for block in parser.meta if (m := heading.fullmatch("".join(block)))]
     if len(headings) != 1:
         raise ValueError("Degradation task set or score scale changed")
     if not re.search(r"总分\s*/\s*150", "".join(parser.caption)):
         raise ValueError("Degradation total-score scale is missing")
+    count = int(headings[0][1])
+    if not count or len(parser.rows) != count:
+        raise ValueError("Incomplete degradation model catalog")
     period = " ".join("".join(parser.period).split())
-    match = re.fullmatch(r"本轮测试[：:]\s*(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}(?::\d{2})?)[–—-](\d{2}:\d{2}(?::\d{2})?)[（(]北京时间[）)]", period)
+    day = r"(\d{4}-\d{2}-\d{2})"
+    clock = r"(\d{2}:\d{2}(?::\d{2})?)"
+    match = re.fullmatch(rf"本轮测试[：:]\s*{day}\s+{clock}\s*[–—-]\s*(?:{day}\s+)?{clock}\s*[（(]北京时间[）)]", period)
     if not match:
         raise ValueError("Degradation test period is missing or unsupported")
     start = source_time(f"{match[1]}T{match[2]}+08:00")
-    end = source_time(f"{match[1]}T{match[3]}+08:00")
+    end = source_time(f"{match[3] or match[1]}T{match[4]}+08:00")
     if end < start:
         raise ValueError("Degradation test period is reversed")
-    expected = {(m, e) for m, efforts in DEGRADATION_EFFORTS.items() for e in efforts}
     scores = {}
     for row in parser.rows:
         parts = row["key"].split(":")
         key = tuple(parts)
-        if len(parts) != 2 or key not in expected or key in scores or row["strong_count"] != 1:
+        if (len(parts) != 2 or not MODEL_ID.fullmatch(parts[0]) or parts[1] not in EFFORTS
+                or key in scores or row["strong_count"] != 1):
             raise ValueError("Invalid or duplicate degradation configuration")
         value = "".join(row["texts"]).strip()
         if value in {"—", "–", "-"}:
@@ -510,27 +512,29 @@ def degradation_snapshot(html: str) -> dict[str, Any]:
             if not math.isfinite(score) or not 0 <= score <= 150:
                 raise ValueError("Degradation score outside 0–150")
         scores[key] = score
-    if set(scores) != expected:
-        raise ValueError("Incomplete degradation model catalog")
     return {"benchmark_kind": DEGRADATION_KIND, "source_url": SOURCE_URL + "#stationmaster-round",
             "source_started_at": start.isoformat(), "source_updated_at": end.isoformat(),
-            "points": [{"model": m, "effort": e, "score": scores[m, e]}
-                       for m, efforts in DEGRADATION_EFFORTS.items() for e in efforts]}
+            "configuration_count": count,
+            "points": [{"model": m, "effort": e, "score": score} for (m, e), score in scores.items()]}
 
 
 def validate_degradation_snapshot(value: Any) -> bool:
     try:
-        if (set(value) != {"benchmark_kind", "source_url", "source_started_at", "source_updated_at", "points"}
+        if (set(value) != {"benchmark_kind", "source_url", "source_started_at", "source_updated_at", "configuration_count", "points"}
                 or value["benchmark_kind"] != DEGRADATION_KIND
                 or value["source_url"] != SOURCE_URL + "#stationmaster-round"
                 or source_time(value["source_updated_at"]) < source_time(value["source_started_at"])):
             return False
-        expected = [(m, e) for m, efforts in DEGRADATION_EFFORTS.items() for e in efforts]
-        if len(value["points"]) != len(expected):
+        points, count = value["points"], value["configuration_count"]
+        if not isinstance(points, list) or type(count) is not int or not 0 < count == len(points) <= 9999:
             return False
-        for point, key in zip(value["points"], expected):
-            if set(point) != {"model", "effort", "score"} or (point["model"], point["effort"]) != key:
+        seen = set()
+        for point in points:
+            key = point["model"], point["effort"]
+            if (set(point) != {"model", "effort", "score"} or not MODEL_ID.fullmatch(key[0])
+                    or key[1] not in EFFORTS or key in seen):
                 return False
+            seen.add(key)
             if point["score"] is not None:
                 score = finite_number(point["score"])
                 if score is None or not 0 <= score <= 150:
@@ -651,7 +655,7 @@ class RadarService:
             # correctly rejects them. Reject corrupt metadata here as well, so
             # retaining a failed attempt cannot crash the background worker.
             json.dumps(state, allow_nan=False)
-            if isinstance(state, dict) and state.get("schema_version") in (1, 2, 3, 4, 5, 6, CACHE_VERSION):
+            if isinstance(state, dict) and state.get("schema_version") in (1, 2, 3, 4, 5, 6, 7, CACHE_VERSION):
                 snapshot = state.get("snapshot")
                 if snapshot is not None and (not isinstance(snapshot, dict)
                                              or snapshot.get("benchmark_kind") != DEGRADATION_KIND):
@@ -661,6 +665,11 @@ class RadarService:
                     state["next_attempt_at_epoch"] = now
                     state["failures"] = 0
                     snapshot = None
+                if state["schema_version"] == 7 and snapshot is not None:
+                    expected = [(m, e) for m in V7_MODELS for e in (EFFORTS[:-1] if "luna" in m else EFFORTS)]
+                    rows = snapshot.get("points")
+                    if isinstance(rows, list) and [(p.get("model"), p.get("effort")) for p in rows if isinstance(p, dict)] == expected:
+                        snapshot["configuration_count"] = len(expected)
                 fetched = finite_number(state.get("fetched_at_epoch"))
                 if snapshot is None or (validate_degradation_snapshot(snapshot) and fetched is not None and 0 < fetched <= now + 60):
                     self._state = state
@@ -668,7 +677,7 @@ class RadarService:
                         self._state.pop("fetched_at_epoch", None)
         except (OSError, ValueError):
             pass
-        if self._state.get("schema_version") in (1, 2, 3, 4, 5, 6):
+        if self._state.get("schema_version") in (1, 2, 3, 4, 5, 6, 7):
             self._state["failures"] = 0
             self._state["next_attempt_at_epoch"] = now
             self._state["last_error"] = "Updating the Radar snapshot to the current model catalog and benchmark rules."
@@ -791,8 +800,7 @@ def __getattr__(name: str) -> str:
     if name == "STYLE":
         return asset_text("static/radar.css")
     if name == "SCRIPT":
-        return asset_text("static/radar.js").replace(
-            "__RADAR_BENCH_EFFORTS__", json.dumps(DEGRADATION_EFFORTS))
+        return asset_text("static/radar.js")
     raise AttributeError(name)
 
 

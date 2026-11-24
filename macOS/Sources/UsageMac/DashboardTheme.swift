@@ -20,6 +20,8 @@ enum DashboardTheme {
 
     static func radarColor(_ model: String) -> Color {
         switch model {
+        case "gpt-6.2-astra": return color(0xfb7185)
+        case "gpt-6.2-sol": return color(0x4ade80)
         case "gpt-6-astra": return color(0xf97316)
         case "gpt-6.1-sol": return color(0xfde047)
         case "gpt-6.1-terra": return color(0x38bdf8)
