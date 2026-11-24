@@ -83,15 +83,10 @@ private struct RadarScoreCard: View, Equatable {
                 .fill(LinearGradient(colors: [.white.opacity(0.035), .clear], startPoint: .topLeading, endPoint: .bottomTrailing))
         }
         .background(DashboardTheme.field, in: RoundedRectangle(cornerRadius: 9))
-        .overlay { RoundedRectangle(cornerRadius: 9).strokeBorder(DashboardTheme.line) }
         .overlay {
-            RoundedRectangle(cornerRadius: 9).strokeBorder(color, lineWidth: 2)
-                .mask(alignment: .top) { Rectangle().frame(height: 10) }
-                .allowsHitTesting(false)
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: 9).strokeBorder(color, lineWidth: 1)
-                .opacity(hovered ? 1 : 0)
+            (hovered ? color : DashboardTheme.line)
+                .overlay(alignment: .top) { color.frame(height: 10) }
+                .mask { RoundedRectangle(cornerRadius: 9).strokeBorder(lineWidth: 1) }
                 .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: hovered)
                 .allowsHitTesting(false)
         }
