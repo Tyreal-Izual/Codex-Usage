@@ -1,15 +1,12 @@
 import SwiftUI
 
-struct Panel<Content: View>: View {
-    let title: String
-    var subtitle: String = ""
-    var facts: [PanelFact] = []
+struct Panel<Header: View, Content: View>: View {
     var fillHeight = false
+    @ViewBuilder var header: Header
     @ViewBuilder var content: Content
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            PanelHeader(title: title, subtitle: subtitle, facts: facts)
-                .equatable()
+            header
                 .padding(.horizontal, 20).padding(.vertical, 12)
                 .background(DashboardTheme.panelStrong)
             DashboardDivider()
@@ -23,6 +20,15 @@ struct Panel<Content: View>: View {
         .clipShape(RoundedRectangle(cornerRadius: 14))
         .overlay { RoundedRectangle(cornerRadius: 14).strokeBorder(DashboardTheme.line) }
         .shadow(color: .black.opacity(0.18), radius: 12, y: 6)
+    }
+}
+
+extension Panel where Header == EquatableView<PanelHeader> {
+    init(title: String, subtitle: String = "", facts: [PanelFact] = [], fillHeight: Bool = false,
+         @ViewBuilder content: () -> Content) {
+        self.init(fillHeight: fillHeight, header: {
+            PanelHeader(title: title, subtitle: subtitle, facts: facts).equatable()
+        }, content: content)
     }
 }
 

@@ -109,7 +109,22 @@ struct IsambardView: View, Equatable {
         self.maintenance = maintenance
     }
     var body: some View {
-        Panel(title: language.text("Isambard Status", "Isambard 服务状态"), subtitle: localDate(data["status"]["fetched_at"], language: language)) {
+        let updatedAt = localDate(data["status"]["fetched_at"], language: language)
+        Panel {
+            HStack(alignment: .firstTextBaseline, spacing: 0) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(language.text("Isambard Status", "Isambard 服务状态"))
+                        .font(.headline.weight(.bold)).accessibilityAddTraits(.isHeader)
+                    if !maintenance {
+                        MaintenanceLink(status: data["status"], language: language)
+                    }
+                }
+                .fixedSize()
+                Spacer(minLength: 8)
+                Text(updatedAt).font(.caption).foregroundStyle(DashboardTheme.muted)
+                    .lineLimit(1).minimumScaleFactor(0.85).help(updatedAt)
+            }
+        } content: {
             if data["warning"] != .null { Notice(text: data["warning"].display) }
             EqualWidthCardsLayout(minimumColumnWidth: 250, maximumColumns: 3, spacing: 12) {
                 ForEach(identifiedValues(data["status"]["statuses"].items, key: { $0.statusIdentity })) { entry in
@@ -119,9 +134,80 @@ struct IsambardView: View, Equatable {
             if maintenance {
                 DashboardDivider()
                 Text(language.text("Planned maintenance", "计划维护")).font(.headline)
-                RecordTable(headers: data["status"]["maintenance_headers"].items.map { $0.display(locale: language.locale) },
-                            rows: arrayRows(data["status"]["maintenance_rows"].items, language: language), language: language)
+                MaintenanceSchedule(status: data["status"], language: language)
             }
+        }
+    }
+}
+
+private struct MaintenanceLink: View {
+    let status: JSONValue
+    let language: Language
+    @State private var showingSchedule = false
+
+    var body: some View {
+        let title = language.text("Planned maintenance", "计划维护")
+        Button {
+            showingSchedule = true
+        } label: {
+            HStack(spacing: 5) {
+                Text(title)
+                if case let .array(rows) = status["maintenance_rows"] { Text("(\(rows.count))") }
+                Image(systemName: "arrow.right").accessibilityHidden(true)
+            }
+        }
+        .buttonStyle(.link).foregroundStyle(DashboardTheme.accent).fontWeight(.semibold)
+        .sheet(isPresented: $showingSchedule) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text(title).font(.headline)
+                    Spacer()
+                    Button(language.text("Done", "完成")) { showingSchedule = false }
+                        .keyboardShortcut(.cancelAction)
+                }
+                DashboardDivider()
+                ScrollView {
+                    MaintenanceSchedule(status: status, language: language)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .padding(20).frame(width: 540, height: 360)
+            .background(DashboardTheme.panel)
+        }
+    }
+}
+
+private struct MaintenanceSchedule: View {
+    let status: JSONValue
+    let language: Language
+
+    var body: some View {
+        if case let .array(items) = status["maintenance_rows"] {
+            if items.isEmpty {
+                Text(language.text("No planned maintenance is listed.", "当前没有列出的维护计划。"))
+                    .foregroundStyle(DashboardTheme.muted)
+            } else {
+                let headers = status["maintenance_headers"].items
+                let rows = arrayRows(items, language: language)
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(rows) { row in
+                        Grid(alignment: .topLeading, horizontalSpacing: 14, verticalSpacing: 6) {
+                            ForEach(row.cells.indices, id: \.self) { column in
+                                GridRow {
+                                    Text(headers.indices.contains(column) ? headers[column].display(locale: language.locale) : "")
+                                        .fontWeight(.semibold).foregroundStyle(DashboardTheme.muted)
+                                    Text(row.cells[column]).fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                        }
+                        if row.id != rows.last?.id { DashboardDivider() }
+                    }
+                }
+                .textSelection(.enabled)
+            }
+        } else {
+            Text(language.text("Maintenance schedule unavailable.", "暂时无法获取维护计划。"))
+                .foregroundStyle(DashboardTheme.muted)
         }
     }
 }

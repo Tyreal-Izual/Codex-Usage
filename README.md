@@ -26,6 +26,7 @@ Overview order: **Limits → Isambard → Models → Codex Reset Credits → Rad
 Codex and Claude limits occupy separate rows; model cards sit side by side when
 space permits. Compact cards show reset countdowns, expandable service details and
 credit-expiry hints. Headers wrap as needed, and changed numbers briefly highlight.
+Select **Planned maintenance** in the Isambard panel to read the schedule in the app.
 
 - **Settings (`⌘,`)**: sources, English/Chinese, refresh interval and history rows.
 - **Back to limits**: align Codex limits with the top; startup does this once after
